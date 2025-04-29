@@ -4,6 +4,11 @@ layout (location = 1) in vec2 aTexCoord;
 layout (location = 2) in vec3 aNormal;
 layout (location = 3) in mat4 instanceModel;
 layout (location = 7) in float instanceSelected;
+layout (location = 8) in float instanceIsLightSource;
+layout (location = 9) in float instanceLightIntensity;
+// Новые атрибуты для гизмо
+layout (location = 2) in vec3 aColor; // Цвет гизмо (если используется)
+layout (location = 3) in float aGizmoType; // Тип гизмо
 
 layout (std140) uniform Matrices {
     mat4 projection;
@@ -14,6 +19,11 @@ out vec2 TexCoord;
 out vec3 Normal;
 out vec3 FragPos;
 out float isSelected;
+out float isLightSource;
+out float lightIntensity;
+// Переменные для гизмо
+out vec3 GizmoColor;
+out float GizmoType;
 
 void main() {
     mat4 model = instanceModel;
@@ -27,4 +37,10 @@ void main() {
     
     FragPos = vec3(model * vec4(aPos, 1.0));
     isSelected = instanceSelected;
+    isLightSource = instanceIsLightSource;
+    lightIntensity = instanceLightIntensity;
+    
+    // Передаем данные для гизмо
+    GizmoColor = aColor;
+    GizmoType = aGizmoType;
 }

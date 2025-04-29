@@ -16,7 +16,7 @@
 #include "scene.hpp"
 
 // Global variables for camera
-float camPosX = 0.0f, camPosY = 0.0f, camPosZ = 10.0f;
+float camPosX = 0.0f, camPosY = 2.0f, camPosZ = 5.0f;
 float camYaw = 0.0f, camPitch = 0.0f;
 float camSpeed = 5.0f;
 float camRotSpeed = 0.1f;
@@ -45,15 +45,19 @@ struct {
     GLint light_direction;
     GLint light_type;
     GLint viewPos;
+    GLint time;
 } uniforms;
 
-// Gizmo VAO/VBO
+// Gizmo VAO/VBO for different light types
 GLuint gizmoVAO, gizmoVBO, gizmoEBO;
 unsigned int gizmoIndexCount;
+GLuint sphereVAO, sphereVBO, sphereEBO; // Для визуализации радиуса точечного света
+unsigned int sphereIndexCount;
 
-// Global variable for projection matrix
+// Global variable for projection matrix and time
 glm::mat4 projection = glm::mat4(1.0f);
 int windowWidth = 800, windowHeight = 600;
+float globalTime = 0.0f;
 
 // Scene and object management
 Scene scene;
@@ -93,8 +97,8 @@ GLuint loadTexture(const char* filename) {
     }
 
     int width = *(int*)&header[18];
-    int height = *(int*) &header[22];
-    int imageSize = *(int*) &header[34];
+    int height = *(int*)&header[22];
+    int imageSize = *(int*)&header[34];
 
     unsigned char* data = new unsigned char[imageSize];
     if (fread(data, 1, imageSize, file) != (size_t)imageSize) {
@@ -121,9 +125,9 @@ GLuint loadTexture(const char* filename) {
 }
 
 // Create shader program
-GLuint createShaderProgram() {
-    std::string vertexShaderCode = readShaderFile("vertex.glsl");
-    std::string fragmentShaderCode = readShaderFile("fragment.glsl");
+GLuint createShaderProgram(const char* vertexFile, const char* fragmentFile) {
+    std::string vertexShaderCode = readShaderFile(vertexFile);
+    std::string fragmentShaderCode = readShaderFile(fragmentFile);
 
     if (vertexShaderCode.empty() || fragmentShaderCode.empty()) {
         printf("Error reading shader files\n");
@@ -189,6 +193,7 @@ GLuint createShaderProgram() {
     uniforms.light_direction = glGetUniformLocation(shaderProgram, "light_direction");
     uniforms.light_type = glGetUniformLocation(shaderProgram, "light_type");
     uniforms.viewPos = glGetUniformLocation(shaderProgram, "viewPos");
+    uniforms.time = glGetUniformLocation(shaderProgram, "time");
 
     return shaderProgram;
 }
@@ -204,131 +209,95 @@ void initMatrixUBO() {
 
 // Initialize cube VBO and VAO for LOD
 void initCubeVBO(int lod) {
-    // Vertex format: position (x, y, z), texcoord (u, v), normal (nx, ny, nz)
-    
-    // High LOD: Full cube with 24 vertices (4 per face, 6 faces)
     float vertices_high[] = {
-        // Front face (z = 0.5)
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f,  0.0f,  1.0f, // Bottom-left
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f,  0.0f,  1.0f, // Bottom-right
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f, // Top-right
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f, // Top-left
-        // Back face (z = -0.5)
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f, // Bottom-left
-         0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f, // Bottom-right
-         0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  0.0f, -1.0f, // Top-right
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  0.0f, -1.0f, // Top-left
-        // Left face (x = -0.5)
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,  0.0f,  0.0f, // Bottom-back
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, -1.0f,  0.0f,  0.0f, // Bottom-front
-        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, -1.0f,  0.0f,  0.0f, // Top-front
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, -1.0f,  0.0f,  0.0f, // Top-back
-        // Right face (x = 0.5)
-         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  1.0f,  0.0f,  0.0f, // Bottom-front
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  1.0f,  0.0f,  0.0f, // Bottom-back
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  1.0f,  0.0f,  0.0f, // Top-back
-         0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  1.0f,  0.0f,  0.0f, // Top-front
-        // Top face (y = 0.5)
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  1.0f,  0.0f, // Front-left
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  1.0f,  0.0f, // Front-right
-         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  1.0f,  0.0f, // Back-right
-        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  1.0f,  0.0f, // Back-left
-        // Bottom face (y = -0.5)
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  0.0f, -1.0f,  0.0f, // Back-left
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,  0.0f, -1.0f,  0.0f, // Back-right
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f, -1.0f,  0.0f, // Front-right
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, -1.0f,  0.0f  // Front-left
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  1.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, -1.0f,  0.0f
     };
 
     unsigned int indices_high[] = {
-        // Front face
         0,  1,  2,   2,  3,  0,
-        // Back face
         4,  5,  6,   6,  7,  4,
-        // Left face
         8,  9, 10,  10, 11,  8,
-        // Right face
         12, 13, 14,  14, 15, 12,
-        // Top face
         16, 17, 18,  18, 19, 16,
-        // Bottom face
         20, 21, 22,  22, 23, 20
     };
 
-    // Medium LOD: Same vertex count (24 vertices), but simplified texture coordinates
     float vertices_medium[] = {
-        // Front face (z = 0.5)
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f,  0.0f,  1.0f, // Bottom-left
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f,  0.0f,  1.0f, // Bottom-right
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f, // Top-right
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f, // Top-left
-        // Back face (z = -0.5)
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f, // Bottom-left
-         0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f, // Bottom-right
-         0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  0.0f, -1.0f, // Top-right
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  0.0f, -1.0f, // Top-left
-        // Left face (x = -0.5)
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,  0.0f,  0.0f, // Bottom-back
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, -1.0f,  0.0f,  0.0f, // Bottom-front
-        -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, -1.0f,  0.0f,  0.0f, // Top-front
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, -1.0f,  0.0f,  0.0f, // Top-back
-        // Right face (x = 0.5)
-         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  1.0f,  0.0f,  0.0f, // Bottom-front
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  1.0f,  0.0f,  0.0f, // Bottom-back
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  1.0f,  0.0f,  0.0f, // Top-back
-         0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  1.0f,  0.0f,  0.0f, // Top-front
-        // Top face (y = 0.5)
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  1.0f,  0.0f, // Front-left
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  1.0f,  0.0f, // Front-right
-         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  1.0f,  0.0f, // Back-right
-        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  1.0f,  0.0f, // Back-left
-        // Bottom face (y = -0.5)
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  0.0f, -1.0f,  0.0f, // Back-left
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,  0.0f, -1.0f,  0.0f, // Back-right
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,  0.0f, -1.0f,  0.0f, // Front-right
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, -1.0f,  0.0f  // Front-left
+        -0.5f, -0.5f, 0.5f,  0.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+         0.5f, -0.5f, 0.5f,  1.0f, 0.0f,  0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f, 0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f, 0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f,  0.0f,  0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  0.0f,  0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, 0.5f,  1.0f, 0.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, 0.5f,  1.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, -1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, 0.5f,  0.0f, 0.0f,  1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, 0.5f,  0.0f, 1.0f,  1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, 0.5f,  0.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, 0.5f,  1.0f, 1.0f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  1.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, 0.5f,  1.0f, 0.0f,  0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f, 0.5f,  0.0f, 0.0f,  0.0f, -1.0f,  0.0f
     };
 
     unsigned int indices_medium[] = {
-        // Front face
         0,  1,  2,   2,  3,  0,
-        // Back face
         4,  5,  6,   6,  7,  4,
-        // Left face
         8,  9, 10,  10, 11,  8,
-        // Right face
         12, 13, 14,  14, 15, 12,
-        // Top face
         16, 17, 18,  18, 19, 16,
-        // Bottom face
         20, 21, 22,  22, 23, 20
     };
 
-    // Low LOD: Minimal cube with 8 vertices (shared across faces)
     float vertices_low[] = {
-        // Corners of the cube
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f, // 0: Bottom-back-left
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f, // 1: Bottom-back-right
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f, // 2: Bottom-front-right
-        -0.5f, -0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f, // 3: Bottom-front-left
-        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f, // 4: Top-back-left
-         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f, // 5: Top-back-right
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f, // 6: Top-front-right
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f  // 7: Top-front-left
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 0.0f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,  0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,  0.0f,  0.0f,  1.0f
     };
 
     unsigned int indices_low[] = {
-        // Front face (z = 0.5)
         3, 2, 6,   6, 7, 3,
-        // Back face (z = -0.5)
         0, 1, 5,   5, 4, 0,
-        // Left face (x = -0.5)
         0, 4, 7,   7, 3, 0,
-        // Right face (x = 0.5)
         1, 2, 6,   6, 5, 1,
-        // Top face (y = 0.5)
         4, 5, 6,   6, 7, 4,
-        // Bottom face (y = -0.5)
         0, 1, 2,   2, 3, 0
     };
 
@@ -350,7 +319,6 @@ void initCubeVBO(int lod) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[lod]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexSizes[lod], indices[lod], GL_STATIC_DRAW);
 
-    // Vertex attributes: position, texcoord, normal
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
@@ -371,32 +339,64 @@ void initInstanceVBO() {
 }
 
 // Update instance VBO
-void updateInstanceVBO(int lod) {
+void updateInstanceVBO(int lod, bool renderLights = false) {
     std::vector<glm::mat4> modelMatrices;
     std::vector<float> selections;
+    std::vector<float> isLightSources;
+    std::vector<float> lightIntensities;
     glm::vec3 camPos(camPosX, camPosY, camPosZ);
 
     for (const auto& obj : scene.getObjects()) {
-        if (obj.type != CUBE) continue;
+        if (!obj.isVisible) continue;
+        if (renderLights && (obj.type != POINT_LIGHT && obj.type != DIRECTIONAL_LIGHT && obj.type != AMBIENT_LIGHT)) continue;
+        if (!renderLights && obj.type != CUBE) continue;
         float distance = glm::length(obj.position - camPos);
         int selectedLOD = selectLOD(distance);
-        if (selectedLOD != lod) continue; // Only include objects for this LOD
+        if (selectedLOD != lod) continue;
 
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, obj.position);
-        model = glm::rotate(model, glm::radians(obj.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(obj.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::scale(model, glm::vec3(obj.scale));
+
+        // Визуальные отличия источников света
+        if (obj.type == CUBE || obj.type == POINT_LIGHT || obj.type == DIRECTIONAL_LIGHT || obj.type == AMBIENT_LIGHT) {
+            model = glm::rotate(model, glm::radians(obj.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(obj.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+            float scale = obj.scale;
+            if (obj.type == POINT_LIGHT) {
+                scale = 0.15f; // Точечный свет - маленький куб
+            } else if (obj.type == DIRECTIONAL_LIGHT) {
+                scale = 0.2f; // Направленный свет - стрелка
+                glm::vec3 dir = glm::normalize(obj.lightDirection);
+                glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+                if (glm::abs(glm::dot(dir, up)) > 0.99f) up = glm::vec3(0.0f, 0.0f, 1.0f);
+                glm::vec3 right = glm::normalize(glm::cross(up, dir));
+                up = glm::cross(dir, right);
+                glm::mat4 rotation = glm::mat4(
+                    glm::vec4(right, 0.0f),
+                    glm::vec4(up, 0.0f),
+                    glm::vec4(dir, 0.0f),
+                    glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)
+                );
+                model = model * rotation;
+            } else if (obj.type == AMBIENT_LIGHT) {
+                // Пульсация для окружающего света при выделении
+                scale = (selectedObjectId == obj.id) ? 0.2f + 0.05f * sin(globalTime * 2.0f) : 0.2f;
+            }
+            model = glm::scale(model, glm::vec3(scale));
+        }
         modelMatrices.push_back(model);
         selections.push_back(obj.id == selectedObjectId ? 1.0f : 0.0f);
+        isLightSources.push_back((obj.type == POINT_LIGHT || obj.type == DIRECTIONAL_LIGHT || obj.type == AMBIENT_LIGHT) ? 1.0f : 0.0f);
+        lightIntensities.push_back(obj.lightIntensity);
     }
 
-    // Only update VBO if there are objects to render
     if (!modelMatrices.empty()) {
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-        glBufferData(GL_ARRAY_BUFFER, modelMatrices.size() * (sizeof(glm::mat4) + sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, modelMatrices.size() * (sizeof(glm::mat4) + 3 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
         glBufferSubData(GL_ARRAY_BUFFER, 0, modelMatrices.size() * sizeof(glm::mat4), modelMatrices.data());
         glBufferSubData(GL_ARRAY_BUFFER, modelMatrices.size() * sizeof(glm::mat4), selections.size() * sizeof(float), selections.data());
+        glBufferSubData(GL_ARRAY_BUFFER, modelMatrices.size() * (sizeof(glm::mat4) + sizeof(float)), isLightSources.size() * sizeof(float), isLightSources.data());
+        glBufferSubData(GL_ARRAY_BUFFER, modelMatrices.size() * (sizeof(glm::mat4) + 2 * sizeof(float)), lightIntensities.size() * sizeof(float), lightIntensities.data());
 
         glBindVertexArray(VAOs[lod]);
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
@@ -408,38 +408,43 @@ void updateInstanceVBO(int lod) {
         glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, sizeof(float), (void*)(modelMatrices.size() * sizeof(glm::mat4)));
         glEnableVertexAttribArray(7);
         glVertexAttribDivisor(7, 1);
+        glVertexAttribPointer(8, 1, GL_FLOAT, GL_FALSE, sizeof(float), (void*)(modelMatrices.size() * (sizeof(glm::mat4) + sizeof(float))));
+        glEnableVertexAttribArray(8);
+        glVertexAttribDivisor(8, 1);
+        glVertexAttribPointer(9, 1, GL_FLOAT, GL_FALSE, sizeof(float), (void*)(modelMatrices.size() * (sizeof(glm::mat4) + 2 * sizeof(float))));
+        glEnableVertexAttribArray(9);
+        glVertexAttribDivisor(9, 1);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
     }
 }
 
-// Initialize gizmo VBO/VAO
+// Initialize gizmo VBO/VAO (for directional light and cube gizmos)
 void initGizmoVBO() {
     float gizmoVertices[] = {
-        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        // Оси для куба и направленного света
+        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, // X ось (красная)
         1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, 0.707f, 0.707f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, 0.707f, -0.707f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, -0.707f, -0.707f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, -1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        0.0f, -0.707f, 0.707f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-        1.0f, -0.1f, -0.1f, 1.0f, 0.0f, 0.0f, 0.0f, 2.0f,
-        1.0f, 0.1f, -0.1f, 1.0f, 0.0f, 0.0f, 0.0f, 2.0f,
-        1.0f, 0.1f, 0.1f, 1.0f, 0.0f, 0.0f, 0.0f, 2.0f,
-        1.0f, -0.1f, 0.1f, 1.0f, 0.0f, 0.0f, 0.0f, 2.0f
+        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, // Y ось (зелёная)
+        0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 2.0f, // Z ось (синяя)
+        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 2.0f,
+        // Стрелка для направленного света
+        0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f, // Начало стрелки
+        0.0f, 0.0f, 2.0f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f, // Конец стрелки
+        0.0f, 0.0f, 2.0f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f,
+        0.2f, 0.0f, 1.5f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f,
+        0.0f, 0.0f, 2.0f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f,
+        -0.2f, 0.0f, 1.5f, 1.0f, 1.0f, 0.0f, 0.0f, 3.0f
     };
 
     unsigned int gizmoIndices[] = {
-        0, 1, 2, 3, 4, 5,
-        6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 6,
-        14, 15, 16, 16, 17, 14
+        0, 1,  // X ось
+        2, 3,  // Y ось
+        4, 5,  // Z ось
+        6, 7,  // Стрелка (основная линия)
+        8, 9,  // Стрелка (правая часть)
+        10, 11 // Стрелка (левая часть)
     };
 
     gizmoIndexCount = sizeof(gizmoIndices) / sizeof(unsigned int);
@@ -455,11 +460,81 @@ void initGizmoVBO() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gizmoEBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(gizmoIndices), gizmoIndices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    // Привязка атрибутов для гизмо
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0); // Позиция
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(5 * sizeof(float)));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); // Цвет
     glEnableVertexAttribArray(2);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(7 * sizeof(float)));
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(7 * sizeof(float))); // GizmoType
+    glEnableVertexAttribArray(3);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+// Initialize sphere VBO/VAO (for point light radius visualization)
+void initSphereVBO() {
+    std::vector<float> vertices;
+    std::vector<unsigned int> indices;
+
+    const int stacks = 16;
+    const int slices = 16;
+    const float radius = 1.0f;
+
+    for (int i = 0; i <= stacks; ++i) {
+        float phi = M_PI * (float)i / stacks;
+        for (int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * M_PI * (float)j / slices;
+
+            float x = radius * sin(phi) * cos(theta);
+            float y = radius * sin(phi) * sin(theta);
+            float z = radius * cos(phi);
+
+            // Position
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
+            // Color (white for wireframe)
+            vertices.push_back(1.0f);
+            vertices.push_back(1.0f);
+            vertices.push_back(1.0f);
+            // Gizmo type
+            vertices.push_back(4.0f);
+        }
+    }
+
+    for (int i = 0; i < stacks; ++i) {
+        for (int j = 0; j < slices; ++j) {
+            int k1 = i * (slices + 1) + j;
+            int k2 = k1 + slices + 1;
+
+            indices.push_back(k1);
+            indices.push_back(k2);
+
+            indices.push_back(k1);
+            indices.push_back(k1 + 1);
+        }
+    }
+
+    sphereIndexCount = indices.size();
+
+    glGenVertexArrays(1, &sphereVAO);
+    glBindVertexArray(sphereVAO);
+
+    glGenBuffers(1, &sphereVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+    glGenBuffers(1, &sphereEBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+    // Привязка атрибутов для сферы
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)0); // Позиция
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(3 * sizeof(float))); // Цвет
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(6 * sizeof(float))); // GizmoType
     glEnableVertexAttribArray(3);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -468,10 +543,9 @@ void initGizmoVBO() {
 
 // Select LOD based on distance
 int selectLOD(float distance) {
-    // Clear distance thresholds: high LOD (<5 units), medium LOD (5-15 units), low LOD (>15 units)
-    if (distance < 5.0f) return 0; // High LOD
-    if (distance < 15.0f) return 1; // Medium LOD
-    return 2; // Low LOD
+    if (distance < 5.0f) return 0;
+    if (distance < 15.0f) return 1;
+    return 2;
 }
 
 // Framebuffer size callback
@@ -605,7 +679,6 @@ void mouseMoveCallback(GLFWwindow* window, double xpos, double ypos) {
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int /*mods*/) {
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
-            // Check if mouse is over ImGui window
             bool isOverImGui = ImGui::GetIO().WantCaptureMouse;
 
             isDragging = true;
@@ -616,32 +689,33 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int /*mods*
             lastX = (xpos / width) * 2 - 1;
             lastY = -((ypos / height) * 2 - 1);
 
-            // Only handle deselection if not over ImGui and in default mode
             if (!isOverImGui && !isRotating && !isScaling && !isTranslating) {
-                // Check if we clicked on empty space to deselect
-                bool clickedOnObject = false;
+                float minDist = FLT_MAX;
+                int closestObjectId = -1;
+
                 for (const auto& obj : scene.getObjects()) {
-                    if (obj.type == CUBE) {
-                        // Simple distance check (could be improved with proper raycasting)
-                        glm::vec3 screenPos = glm::project(
-                            obj.position,
-                            glm::lookAt(glm::vec3(camPosX, camPosY, camPosZ),
-                                glm::vec3(camPosX, camPosY, camPosZ) + cameraFront,
-                                glm::vec3(0.0f, 1.0f, 0.0f)),
-                            projection,
-                            glm::vec4(0, 0, width, height)
-                        );
-                        float dist = glm::distance(glm::vec2(screenPos), glm::vec2(xpos, height - ypos));
-                        if (dist < 30.0f) { // Threshold distance
-                            clickedOnObject = true;
-                            selectedObjectId = obj.id; // Select the clicked object
-                            break;
-                        }
+                    if (!obj.isVisible) continue;
+                    glm::vec3 screenPos = glm::project(
+                        obj.position,
+                        glm::lookAt(glm::vec3(camPosX, camPosY, camPosZ),
+                            glm::vec3(camPosX, camPosY, camPosZ) + cameraFront,
+                            glm::vec3(0.0f, 1.0f, 0.0f)),
+                        projection,
+                        glm::vec4(0, 0, width, height)
+                    );
+                    float dist = glm::distance(glm::vec2(screenPos), glm::vec2(xpos, height - ypos));
+                    float clickRadius = 30.0f; // Базовый радиус клика
+                    if (obj.type == POINT_LIGHT || obj.type == DIRECTIONAL_LIGHT || obj.type == AMBIENT_LIGHT) {
+                        clickRadius = 50.0f; // Увеличенный радиус для источников света
+                    }
+                    if (dist < clickRadius && dist < minDist) {
+                        minDist = dist;
+                        closestObjectId = obj.id;
                     }
                 }
 
-                if (!clickedOnObject) {
-                    selectedObjectId = -1; // Deselect if clicked on empty space
+                selectedObjectId = closestObjectId;
+                if (selectedObjectId == -1) {
                     isRotating = isScaling = isTranslating = false;
                 }
                 sceneDirty = true;
@@ -653,24 +727,12 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int /*mods*
     }
 }
 
-// Draw text (stub)
-void drawText(float /*x*/, float /*y*/, const char* /*text*/, float /*r*/, float /*g*/, float /*b*/) {
-    // Text rendering implementation
-}
-
-// Draw UI
-void drawUI(int /*lod*/) {
-    // UI rendering implementation
-}
-
 // Draw ImGui panel
 void drawImGui() {
-    // Start new ImGui frame
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // Scene hierarchy window (fixed to the left)
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(windowWidth * 0.25f, windowHeight), ImGuiCond_Always);
@@ -712,14 +774,22 @@ void drawImGui() {
                     sceneDirty = true;
                 }
                 float intensity = obj.lightIntensity;
-                if (ImGui::DragFloat("Intensity", &intensity, 0.01f, 0.0f, 10.0f)) {
-                    scene.getObject(obj.id)->lightIntensity = intensity;
-                    sceneDirty = true;
+                if (obj.type == POINT_LIGHT) {
+                    if (ImGui::DragFloat("Intensity (Radius)", &intensity, 0.01f, 0.0f, 10.0f)) {
+                        scene.getObject(obj.id)->lightIntensity = intensity;
+                        sceneDirty = true;
+                    }
+                } else {
+                    if (ImGui::DragFloat("Intensity", &intensity, 0.01f, 0.0f, 10.0f)) {
+                        scene.getObject(obj.id)->lightIntensity = intensity;
+                        sceneDirty = true;
+                    }
                 }
                 if (obj.type == DIRECTIONAL_LIGHT) {
                     float dir[3] = { obj.lightDirection.x, obj.lightDirection.y, obj.lightDirection.z };
                     if (ImGui::DragFloat3("Direction", dir, 0.1f)) {
-                        scene.getObject(obj.id)->lightDirection = glm::normalize(glm::vec3(dir[0], dir[1], dir[2]));
+                        glm::vec3 newDir = glm::normalize(glm::vec3(dir[0], dir[1], dir[2]));
+                        scene.getObject(obj.id)->lightDirection = newDir;
                         sceneDirty = true;
                     }
                 }
@@ -774,24 +844,48 @@ void drawImGui() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-// Draw cubes with instancing
-void drawCubes(int lod, bool isOutlinePass) {
+// Draw objects
+void drawObjects(int lod, bool isOutlinePass, bool renderLights = false) {
     glUniform1i(uniforms.isOutline, isOutlinePass ? 1 : 0);
-    glUniform1f(uniforms.outlineWidth, 0.2f); // Adjust outline width as needed
-    updateInstanceVBO(lod);
+    glUniform1f(uniforms.outlineWidth, 0.2f);
+    glUniform1f(uniforms.time, globalTime);
+    updateInstanceVBO(lod, renderLights);
     glBindVertexArray(VAOs[lod]);
-    // Only draw if there are instances to avoid OpenGL errors
     std::vector<glm::mat4> modelMatrices;
     glm::vec3 camPos(camPosX, camPosY, camPosZ);
     for (const auto& obj : scene.getObjects()) {
-        if (obj.type != CUBE) continue;
+        if (!obj.isVisible) continue;
+        if (renderLights && (obj.type != POINT_LIGHT && obj.type != DIRECTIONAL_LIGHT && obj.type != AMBIENT_LIGHT)) continue;
+        if (!renderLights && obj.type != CUBE) continue;
         float distance = glm::length(obj.position - camPos);
         if (selectLOD(distance) == lod) {
             glm::mat4 model = glm::mat4(1.0f);
             model = glm::translate(model, obj.position);
-            model = glm::rotate(model, glm::radians(obj.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(obj.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-            model = glm::scale(model, glm::vec3(obj.scale));
+            if (obj.type == CUBE || obj.type == POINT_LIGHT || obj.type == DIRECTIONAL_LIGHT || obj.type == AMBIENT_LIGHT) {
+                model = glm::rotate(model, glm::radians(obj.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+                model = glm::rotate(model, glm::radians(obj.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+                float scale = obj.scale;
+                if (obj.type == POINT_LIGHT) {
+                    scale = 0.15f;
+                } else if (obj.type == DIRECTIONAL_LIGHT) {
+                    scale = 0.2f;
+                    glm::vec3 dir = glm::normalize(obj.lightDirection);
+                    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+                    if (glm::abs(glm::dot(dir, up)) > 0.99f) up = glm::vec3(0.0f, 0.0f, 1.0f);
+                    glm::vec3 right = glm::normalize(glm::cross(up, dir));
+                    up = glm::cross(dir, right);
+                    glm::mat4 rotation = glm::mat4(
+                        glm::vec4(right, 0.0f),
+                        glm::vec4(up, 0.0f),
+                        glm::vec4(dir, 0.0f),
+                        glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)
+                    );
+                    model = model * rotation;
+                } else if (obj.type == AMBIENT_LIGHT) {
+                    scale = (selectedObjectId == obj.id) ? 0.2f + 0.05f * sin(globalTime * 2.0f) : 0.2f;
+                }
+                model = glm::scale(model, glm::vec3(scale));
+            }
             modelMatrices.push_back(model);
         }
     }
@@ -801,18 +895,79 @@ void drawCubes(int lod, bool isOutlinePass) {
     glBindVertexArray(0);
 }
 
-// Draw gizmo
-void drawGizmo(const glm::vec3& position) {
+// Draw gizmo (for cube and directional light)
+void drawGizmo(const glm::vec3& position, ObjectType type) {
+    printf("Drawing gizmo for object at position (%.2f, %.2f, %.2f), type: %d\n", 
+           position.x, position.y, position.z, type);
+
     glUniform1i(uniforms.isOutline, 0);
+    glUniform1f(uniforms.time, globalTime);
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(model, position);
 
+    if (type == DIRECTIONAL_LIGHT) {
+        SceneObject* obj = scene.getObject(selectedObjectId);
+        if (obj) {
+            glm::vec3 dir = glm::normalize(obj->lightDirection);
+            glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+            if (glm::abs(glm::dot(dir, up)) > 0.99f) up = glm::vec3(0.0f, 0.0f, 1.0f);
+            glm::vec3 right = glm::normalize(glm::cross(up, dir));
+            up = glm::cross(dir, right);
+            glm::mat4 rotation = glm::mat4(
+                glm::vec4(right, 0.0f),
+                glm::vec4(up, 0.0f),
+                glm::vec4(dir, 0.0f),
+                glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)
+            );
+            model = model * rotation;
+            model = glm::scale(model, glm::vec3(0.5f));
+        }
+    } else {
+        model = glm::scale(model, glm::vec3(0.5f));
+    }
+
+    // Обновляем матрицу вида в UBO
+    glm::mat4 view = glm::lookAt(
+        glm::vec3(camPosX, camPosY, camPosZ),
+        glm::vec3(camPosX, camPosY, camPosZ) + cameraFront,
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    );
     glBindBuffer(GL_UNIFORM_BUFFER, matrixUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(model));
+    glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(view));
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     glBindVertexArray(gizmoVAO);
-    glDrawElements(GL_LINES, gizmoIndexCount, GL_UNSIGNED_INT, 0);
+    if (type == DIRECTIONAL_LIGHT) {
+        glDrawElements(GL_LINES, 6, GL_UNSIGNED_INT, (void*)(6 * sizeof(unsigned int)));
+    } else {
+        glDrawElements(GL_LINES, 6, GL_UNSIGNED_INT, 0);
+    }
+    glBindVertexArray(0);
+}
+
+// Draw sphere (for point light radius)
+void drawSphere(const glm::vec3& position, float radius) {
+    printf("Drawing sphere for point light at position (%.2f, %.2f, %.2f), radius: %.2f\n", 
+           position.x, position.y, position.z, radius);
+
+    glUniform1i(uniforms.isOutline, 0);
+    glUniform1f(uniforms.time, globalTime);
+    glm::mat4 model = glm::mat4(1.0f);
+    model = glm::translate(model, position);
+    model = glm::scale(model, glm::vec3(radius));
+
+    // Обновляем матрицу вида в UBO
+    glm::mat4 view = glm::lookAt(
+        glm::vec3(camPosX, camPosY, camPosZ),
+        glm::vec3(camPosX, camPosY, camPosZ) + cameraFront,
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    );
+    glBindBuffer(GL_UNIFORM_BUFFER, matrixUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(view));
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_LINES, sphereIndexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 }
 
@@ -852,8 +1007,6 @@ int main() {
     }
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetKeyCallback(window, keyCallback);
     glfwSetCursorPosCallback(window, mouseMoveCallback);
@@ -861,7 +1014,8 @@ int main() {
 
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        printf("GLEW initialization failed!\n");
+        printf("GLEW initialization failed\n");
+        glfwDestroyWindow(window);
         glfwTerminate();
         return -1;
     }
@@ -873,164 +1027,141 @@ int main() {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // Load texture and verify
-    GLuint diffuseTexture = loadTexture("images.bmp");
-    if (diffuseTexture == 0) {
-        printf("Texture loading failed\n");
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+
+    shaderProgram = createShaderProgram("vertex.glsl", "fragment.glsl");
+    if (!shaderProgram) {
+        glfwDestroyWindow(window);
         glfwTerminate();
         return -1;
     }
-
-    shaderProgram = createShaderProgram();
-    if (shaderProgram == 0) {
-        printf("Shader program creation failed\n");
-        glDeleteTextures(1, &diffuseTexture);
-        glfwTerminate();
-        return -1;
-    }
-
-    initMatrixUBO();
-    GLuint blockIndex = glGetUniformBlockIndex(shaderProgram, "Matrices");
-    if (blockIndex != GL_INVALID_INDEX) {
-        glUniformBlockBinding(shaderProgram, blockIndex, 0);
-    }
-
-    glUseProgram(shaderProgram);
-    glUniform1i(uniforms.material_diffuse, 0); // Bind texture to unit 0
-    glUniform3fv(uniforms.material_specular, 1, glm::value_ptr(glm::vec3(1.0f)));
-    glUniform1f(uniforms.material_shininess, 32.0f);
-    glUniform3fv(uniforms.light_position, 1, glm::value_ptr(glm::vec3(10.0f, 10.0f, 10.0f)));
-    glUniform3fv(uniforms.light_color, 1, glm::value_ptr(glm::vec3(1.0f)));
-    glUniform1f(uniforms.light_ambientStrength, 0.1f);
-    glUniform3fv(uniforms.light_direction, 1, glm::value_ptr(glm::vec3(0.0f, -1.0f, 0.0f)));
-    glUniform1i(uniforms.light_type, 0);
 
     for (int i = 0; i < NUM_LODS; i++) {
         initCubeVBO(i);
     }
     initInstanceVBO();
     initGizmoVBO();
+    initSphereVBO();
+    initMatrixUBO();
 
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_STENCIL_TEST);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK); // Cull back faces
-    glFrontFace(GL_CCW); // Counterclockwise winding for front faces
+    // Добавляем один куб в сцену по умолчанию
+    scene.addObject("Cube_1", glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f), 1.0f);
 
     projection = glm::perspective(glm::radians(45.0f), (float)windowWidth / windowHeight, 0.1f, 100.0f);
     glBindBuffer(GL_UNIFORM_BUFFER, matrixUBO);
-    glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), NULL, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(projection));
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-    scene.addObject("Cube_1", glm::vec3(0.0f), glm::vec2(0.0f), 0.5f);
-    sceneDirty = true;
+    GLuint texture = loadTexture("images.bmp");
+    if (!texture) {
+        printf("Failed to load texture\n");
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+
+    glUseProgram(shaderProgram);
+    glUniform1i(uniforms.material_diffuse, 0);
+    glUniform3f(uniforms.material_specular, 0.5f, 0.5f, 0.5f);
+    glUniform1f(uniforms.material_shininess, 32.0f);
 
     double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
         double currentTime = glfwGetTime();
-        globalDeltaTime = std::min(currentTime - lastTime, 0.1);
+        globalDeltaTime = currentTime - lastTime;
+        globalTime = currentTime;
         lastTime = currentTime;
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
-        glUseProgram(shaderProgram);
-
-        // Bind texture
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, diffuseTexture);
-
         updateCameraFront();
-
         glm::mat4 view = glm::lookAt(
             glm::vec3(camPosX, camPosY, camPosZ),
             glm::vec3(camPosX, camPosY, camPosZ) + cameraFront,
             glm::vec3(0.0f, 1.0f, 0.0f)
         );
-
         glBindBuffer(GL_UNIFORM_BUFFER, matrixUBO);
         glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(view));
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-        glUniform3fv(uniforms.viewPos, 1, glm::value_ptr(glm::vec3(camPosX, camPosY, camPosZ)));
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(shaderProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform3f(uniforms.viewPos, camPosX, camPosY, camPosZ);
+
+        glm::vec3 lightPosition(0.0f, 1.0f, 0.0f);
+        glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
+        float lightAmbientStrength = 0.2f;
+        glm::vec3 lightDirection(0.0f, -1.0f, 0.0f);
+        int lightType = 0;
 
         bool lightFound = false;
         for (const auto& obj : scene.getObjects()) {
-            if (obj.type == AMBIENT_LIGHT) {
-                glUniform1f(uniforms.light_ambientStrength, obj.lightIntensity);
-                glUniform3fv(uniforms.light_color, 1, glm::value_ptr(obj.lightColor));
-                glUniform1i(uniforms.light_type, 2);
-                lightFound = true;
-                break;
-            }
-            else if (obj.type == POINT_LIGHT) {
-                glUniform3fv(uniforms.light_position, 1, glm::value_ptr(obj.position));
-                glUniform3fv(uniforms.light_color, 1, glm::value_ptr(obj.lightColor));
-                glUniform1f(uniforms.light_ambientStrength, 0.1f);
-                glUniform1i(uniforms.light_type, 0);
+            if (obj.type == POINT_LIGHT) {
+                lightPosition = obj.position;
+                lightColor = obj.lightColor;
+                lightAmbientStrength = 0.2f;
+                lightType = 0;
                 lightFound = true;
                 break;
             }
             else if (obj.type == DIRECTIONAL_LIGHT) {
-                glUniform3fv(uniforms.light_direction, 1, glm::value_ptr(obj.lightDirection));
-                glUniform3fv(uniforms.light_color, 1, glm::value_ptr(obj.lightColor));
-                glUniform1f(uniforms.light_ambientStrength, 0.1f);
-                glUniform1i(uniforms.light_type, 1);
+                lightDirection = obj.lightDirection;
+                lightColor = obj.lightColor;
+                lightAmbientStrength = 0.0f;
+                lightType = 1;
+                lightFound = true;
+                break;
+            }
+            else if (obj.type == AMBIENT_LIGHT) {
+                lightColor = obj.lightColor;
+                lightAmbientStrength = obj.lightIntensity;
+                lightType = 2;
                 lightFound = true;
                 break;
             }
         }
+
         if (!lightFound) {
-            glUniform3fv(uniforms.light_position, 1, glm::value_ptr(glm::vec3(10.0f, 10.0f, 10.0f)));
-            glUniform3fv(uniforms.light_color, 1, glm::value_ptr(glm::vec3(1.0f)));
-            glUniform1f(uniforms.light_ambientStrength, 0.1f);
-            glUniform1i(uniforms.light_type, 0);
+            lightAmbientStrength = 0.2f;
+            lightType = 2;
         }
 
-        // Draw cubes with instancing for each LOD
-        for (int lod = 0; lod < NUM_LODS; lod++) {
-            if (selectedObjectId != -1) {
-                glStencilFunc(GL_ALWAYS, 1, 0xFF);
-                glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-                glStencilMask(0xFF);
+        glUniform3f(uniforms.light_position, lightPosition.x, lightPosition.y, lightPosition.z);
+        glUniform3f(uniforms.light_color, lightColor.x, lightColor.y, lightColor.z);
+        glUniform1f(uniforms.light_ambientStrength, lightAmbientStrength);
+        glUniform3f(uniforms.light_direction, lightDirection.x, lightDirection.y, lightDirection.z);
+        glUniform1i(uniforms.light_type, lightType);
 
-                drawCubes(lod, false);
-
-                glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
-                glStencilMask(0x00);
-                glDisable(GL_DEPTH_TEST);
-
-                drawCubes(lod, true);
-
-                glStencilMask(0xFF);
-                glStencilFunc(GL_ALWAYS, 0, 0xFF);
-                glEnable(GL_DEPTH_TEST);
-            }
-            else {
-                drawCubes(lod, false);
-            }
+        for (int i = 0; i < NUM_LODS; i++) {
+            drawObjects(i, false, false);
         }
 
-        // Draw gizmo
-        if (selectedObjectId != -1 && (isTranslating || isRotating || isScaling)) {
-            SceneObject* obj = scene.getObject(selectedObjectId);
-            if (obj && obj->type == CUBE) {
-                drawGizmo(obj->position);
+        for (int i = 0; i < NUM_LODS; i++) {
+            drawObjects(i, true, false);
+        }
+
+        for (int i = 0; i < NUM_LODS; i++) {
+            drawObjects(i, false, true);
+        }
+
+        for (const auto& obj : scene.getObjects()) {
+            if (obj.id == selectedObjectId) {
+                if (obj.type == CUBE) {
+                    drawGizmo(obj.position, CUBE);
+                }
+                else if (obj.type == POINT_LIGHT) {
+                    drawSphere(obj.position, obj.lightIntensity);
+                }
+                else if (obj.type == DIRECTIONAL_LIGHT) {
+                    drawGizmo(obj.position, DIRECTIONAL_LIGHT);
+                }
             }
         }
 
-        // Disable depth and stencil testing for ImGui
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_STENCIL_TEST);
-
-        drawUI(0);
         drawImGui();
-
-        // Re-enable depth and stencil testing
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_STENCIL_TEST);
-
-        sceneDirty = false;
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -1040,17 +1171,20 @@ int main() {
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    glDeleteTextures(1, &diffuseTexture);
     glDeleteVertexArrays(NUM_LODS, VAOs);
     glDeleteBuffers(NUM_LODS, VBOs);
     glDeleteBuffers(NUM_LODS, EBOs);
     glDeleteBuffers(1, &instanceVBO);
-    glDeleteBuffers(1, &matrixUBO);
     glDeleteVertexArrays(1, &gizmoVAO);
     glDeleteBuffers(1, &gizmoVBO);
     glDeleteBuffers(1, &gizmoEBO);
+    glDeleteVertexArrays(1, &sphereVAO);
+    glDeleteBuffers(1, &sphereVBO);
+    glDeleteBuffers(1, &sphereEBO);
     glDeleteProgram(shaderProgram);
+    glDeleteTextures(1, &texture);
 
+    glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
 }

@@ -1,10 +1,13 @@
 #version 330 core
-out vec4 FragColor;
+layout (location = 0) out vec4 FragColor;
+layout (location = 1) out vec4 BrightColor;
 
 in vec2 TexCoord;
 in vec3 Normal;
 in vec3 FragPos;
 in float isSelected;
+in float isLightSource;
+in float lightIntensity;
 
 uniform sampler2D material_diffuse;
 uniform vec3 material_specular;
@@ -19,10 +22,12 @@ uniform bool isOutline;
 uniform float outlineWidth;
 
 void main() {
+    // Initialize outputs
+    FragColor = vec4(0.0);
+    BrightColor = vec4(0.0);
+
     if (isOutline) {
-        // Only show outline for selected objects
         if (isSelected > 0.5) {
-            // Simple outline effect using normal displacement
             vec3 normal = normalize(Normal);
             float edge = max(dot(normal, normalize(viewPos - FragPos)), 0.0);
             if (edge < outlineWidth) {
@@ -33,13 +38,29 @@ void main() {
         discard;
     }
 
+    if (isLightSource > 0.5) {
+        // Emissive rendering for light sources with glow
+        vec3 emissiveColor = light_color * lightIntensity * 2.0;
+        if (isSelected > 0.5) {
+            emissiveColor = mix(emissiveColor, vec3(1.0, 0.5, 0.0), 0.3);
+        }
+        FragColor = vec4(emissiveColor, 1.0);
+
+        // Calculate brightness for bloom
+        float brightness = dot(emissiveColor, vec3(0.2126, 0.7152, 0.0722));
+        if (brightness > 1.0) {
+            BrightColor = vec4(emissiveColor * (brightness - 1.0), 1.0);
+        }
+        return;
+    }
+
+    // Non-light objects (cubes)
     vec3 norm = normalize(Normal);
     vec3 ambient = light_ambientStrength * light_color;
     vec3 result = ambient * texture(material_diffuse, TexCoord).rgb;
 
     if (light_type != 2) {
         vec3 lightDir = (light_type == 1) ? normalize(-light_direction) : normalize(light_position - FragPos);
-        
         float diff = max(dot(norm, lightDir), 0.0);
         vec3 diffuse = diff * light_color;
 
@@ -52,7 +73,6 @@ void main() {
     }
 
     if (isSelected > 0.5) {
-        // Highlight selected object with orange tint
         result = mix(result, vec3(1.0, 0.5, 0.0), 0.3);
     }
 

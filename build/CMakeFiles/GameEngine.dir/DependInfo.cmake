@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/tasherca/GameEngine/main.cpp" "CMakeFiles/GameEngine.dir/main.cpp.o" "gcc" "CMakeFiles/GameEngine.dir/main.cpp.o.d"
+  "/home/tasherca/Документы/NexylEngine-main/main.cpp" "CMakeFiles/GameEngine.dir/main.cpp.o" "gcc" "CMakeFiles/GameEngine.dir/main.cpp.o.d"
   "" "GameEngine" "gcc" "CMakeFiles/GameEngine.dir/link.d"
   )
 
