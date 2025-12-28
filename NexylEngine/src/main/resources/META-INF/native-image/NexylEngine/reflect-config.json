@@ -1,0 +1,45 @@
+[
+            {
+                "name": "java.lang.Class",
+                "allDeclaredConstructors": true,
+                "allPublicConstructors": true,
+                "allDeclaredMethods": true,
+                "allPublicMethods": true
+            },
+            {
+                "name": "java.lang.String",
+                "allDeclaredConstructors": true,
+                "allPublicConstructors": true,
+                "allDeclaredMethods": true,
+                "allPublicMethods": true
+            },
+            {
+                "name": "java.nio.Buffer",
+                "allDeclaredConstructors": true,
+                "allDeclaredMethods": true,
+                "allDeclaredFields": true
+            },
+            {
+                "name": "org.lwjgl.glfw.GLFW",
+                "allDeclaredConstructors": true,
+                "allPublicConstructors": true,
+                "allDeclaredMethods": true,
+                "allPublicMethods": true,
+                "allDeclaredFields": true,
+                "allPublicFields": true
+            },
+            {
+                "name": "org.lwjgl.opengl.GL",
+                "allDeclaredConstructors": true,
+                "allPublicConstructors": true,
+                "allDeclaredMethods": true,
+                "allPublicMethods": true
+            },
+            {
+                "name": "imgui.ImGui",
+                "allDeclaredConstructors": true,
+                "allPublicConstructors": true,
+                "allDeclaredMethods": true,
+                "allPublicMethods": true
+            }
+        ]

@@ -1,0 +1,12 @@
+{
+            "resources": {
+                "includes": [
+                    {"pattern": ".*\\.glsl$"},
+                    {"pattern": ".*\\.properties$"},
+                    {"pattern": ".*\\.dll$"},
+                    {"pattern": ".*\\.so$"},
+                    {"pattern": ".*\\.dylib$"}
+                ]
+            },
+            "bundles": []
+        }
