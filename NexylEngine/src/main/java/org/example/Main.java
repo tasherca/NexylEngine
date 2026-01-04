@@ -5,8 +5,12 @@ import imgui.flag.*;
 import imgui.gl3.ImGuiImplGl3;
 import imgui.glfw.ImGuiImplGlfw;
 import org.lwjgl.BufferUtils;
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,91 +26,79 @@ import static org.lwjgl.opengl.GL33.*;
 import static org.lwjgl.system.MemoryUtil.*;
 
 public class Main {
-    // Application main components
-    private Window window;           // GLFW Window
-    private Renderer renderer;       // Scene renderer
-    private InputHandler inputHandler; // Input handler
-    private Scene scene;             // 3D scene with objects
-    private UIManager uiManager;     // User interface manager
+    private Window window;
+    private Renderer renderer;
+    private InputHandler inputHandler;
+    private Scene scene;
+    private UIManager uiManager;
+    private ProjectFileManager projectFileManager;
     
-    // Timing and application state
-    private boolean isRunning = true; // Main loop flag
-    private float deltaTime = 0.0f;   // Time between frames
-    private double lastFrameTime = 0.0; // Last frame time
-    private FPSCounter fpsCounter = new FPSCounter(); // FPS counter
+    private boolean isRunning = true;
+    private float deltaTime = 0.0f;
+    private double lastFrameTime = 0.0;
+    private FPSCounter fpsCounter = new FPSCounter();
+    private String currentProjectName = "Untitled";
 
-    // Main application launch method
     public void run() {
         try {
-            initialize();   // Initialize all components
-            mainLoop();     // Start main loop
+            initialize();
+            mainLoop();
         } finally {
-            cleanup();      // Clean up resources on exit
+            cleanup();
         }
     }
 
-    // Initialize all application components
     private void initialize() {
         System.out.println("=== APPLICATION INITIALIZATION ===");
         
-        // Create window with 1920x1080 resolution
-        window = new Window(1920, 1080, "3D Scene with Blender-like 3D Cursor");
-        
-        // Create main components
-        renderer = new Renderer();       // Graphics renderer
-        scene = new Scene();             // 3D scene with objects
-        inputHandler = new InputHandler(window, scene, renderer); // Input handler
-        uiManager = new UIManager(window, scene, inputHandler); // UI manager
+        window = new Window(1920, 1080, "3D Scene");
+        renderer = new Renderer();
+        scene = new Scene();
+        inputHandler = new InputHandler(window, scene, renderer);
+        projectFileManager = new ProjectFileManager();
+        uiManager = new UIManager(window, scene, inputHandler, projectFileManager, this);
         
         System.out.println("=== INITIALIZATION COMPLETE ===");
     }
 
-    // Main application loop
     private void mainLoop() {
         System.out.println("=== STARTING MAIN LOOP ===");
         
-        // Main loop runs while application is working and window is not closed
         while (isRunning && !window.shouldClose()) {
-            updateTime();     // Update time
-            handleInput();    // Handle user input
-            update();         // Update game state
-            render();         // Render frame
+            updateTime();
+            handleInput();
+            update();
+            render();
         }
     }
 
-    // Calculate time between frames
     private void updateTime() {
-        double currentTime = glfwGetTime();          // Current time
-        deltaTime = (float) (currentTime - lastFrameTime); // Difference from previous frame
-        lastFrameTime = currentTime;                // Save current frame time
-        fpsCounter.update(deltaTime);               // Update FPS counter
+        double currentTime = glfwGetTime();
+        deltaTime = (float) (currentTime - lastFrameTime);
+        lastFrameTime = currentTime;
+        fpsCounter.update(deltaTime);
     }
 
-    // Handle user input
     private void handleInput() {
-        inputHandler.pollEvents(); // Process GLFW events
+        inputHandler.pollEvents();
     }
 
-    // Update game state
     private void update() {
-        scene.update(deltaTime);      // Update scene
-        inputHandler.update(deltaTime); // Update input handler
+        scene.update(deltaTime);
+        inputHandler.update(deltaTime);
     }
 
-    // Render frame
     private void render() {
-        renderer.beginFrame();                    // Start frame
-        renderer.renderScene(scene, window);      // Render 3D scene
-        uiManager.render(fpsCounter.getFPS());    // Render UI
-        renderer.endFrame();                      // End frame
-        window.swapBuffers();                     // Show frame on screen
+        renderer.beginFrame();
+        renderer.renderScene(scene, window);
+        uiManager.render(fpsCounter.getFPS(), currentProjectName);
+        renderer.endFrame();
+        window.swapBuffers();
     }
 
-    // Clean up resources on exit
     private void cleanup() {
         System.out.println("=== CLEANING UP RESOURCES ===");
         
-        // Clean all components in reverse order of creation
         if (uiManager != null) uiManager.cleanup();
         if (renderer != null) renderer.cleanup();
         if (scene != null) scene.cleanup();
@@ -115,14 +107,136 @@ public class Main {
         System.out.println("=== CLEANUP COMPLETE ===");
     }
 
-    // Application entry point
+    public void saveProject() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filterPatterns = stack.mallocPointer(1);
+            filterPatterns.put(stack.UTF8("*.ne"));
+            filterPatterns.flip();
+            
+            String filePath = TinyFileDialogs.tinyfd_saveFileDialog(
+                "Save Project",
+                currentProjectName + ".ne",
+                filterPatterns,
+                "Nexyl Engine Project Files (*.ne)"
+            );
+            
+            if (filePath != null) {
+                if (!filePath.toLowerCase().endsWith(".ne")) {
+                    filePath += ".ne";
+                }
+                
+                try {
+                    projectFileManager.saveProject(scene, filePath);
+                    currentProjectName = extractFileName(filePath);
+                    System.out.println("Project saved: " + filePath);
+                } catch (IOException e) {
+                    System.err.println("Failed to save project: " + e.getMessage());
+                    TinyFileDialogs.tinyfd_messageBox(
+                        "Error",
+                        "Failed to save project: " + e.getMessage(),
+                        "ok",
+                        "error",
+                        false
+                    );
+                }
+            }
+        }
+    }
+
+    public void saveProjectAs() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filterPatterns = stack.mallocPointer(1);
+            filterPatterns.put(stack.UTF8("*.ne"));
+            filterPatterns.flip();
+            
+            String filePath = TinyFileDialogs.tinyfd_saveFileDialog(
+                "Save Project As",
+                currentProjectName + ".ne",
+                filterPatterns,
+                "Nexyl Engine Project Files (*.ne)"
+            );
+            
+            if (filePath != null) {
+                if (!filePath.toLowerCase().endsWith(".ne")) {
+                    filePath += ".ne";
+                }
+                
+                try {
+                    projectFileManager.saveProject(scene, filePath);
+                    currentProjectName = extractFileName(filePath);
+                    System.out.println("Project saved as: " + filePath);
+                } catch (IOException e) {
+                    System.err.println("Failed to save project: " + e.getMessage());
+                    TinyFileDialogs.tinyfd_messageBox(
+                        "Error",
+                        "Failed to save project: " + e.getMessage(),
+                        "ok",
+                        "error",
+                        false
+                    );
+                }
+            }
+        }
+    }
+
+    public void openProject() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PointerBuffer filterPatterns = stack.mallocPointer(1);
+            filterPatterns.put(stack.UTF8("*.ne"));
+            filterPatterns.flip();
+            
+            String filePath = TinyFileDialogs.tinyfd_openFileDialog(
+                "Open Project",
+                null,
+                filterPatterns,
+                "Nexyl Engine Project Files (*.ne)",
+                false
+            );
+            
+            if (filePath != null) {
+                try {
+                    scene = projectFileManager.loadProject(filePath);
+                    inputHandler.setScene(scene);
+                    uiManager.setScene(scene);
+                    currentProjectName = extractFileName(filePath);
+                    System.out.println("Project loaded: " + filePath);
+                } catch (Exception e) {
+                    System.err.println("Failed to load project: " + e.getMessage());
+                    TinyFileDialogs.tinyfd_messageBox(
+                        "Error",
+                        "Failed to load project: " + e.getMessage(),
+                        "ok",
+                        "error",
+                        false
+                    );
+                }
+            }
+        }
+    }
+
+    public void newProject() {
+        scene = new Scene();
+        inputHandler.setScene(scene);
+        uiManager.setScene(scene);
+        currentProjectName = "Untitled";
+        System.out.println("New project created");
+    }
+
+    private String extractFileName(String filePath) {
+        String fileName = filePath.substring(
+            Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')) + 1
+        );
+        if (fileName.toLowerCase().endsWith(".ne")) {
+            fileName = fileName.substring(0, fileName.length() - 3);
+        }
+        return fileName;
+    }
+
     public static void main(String[] args) {
         System.out.println("=== STARTING 3D APPLICATION ===");
-        System.out.println("Platform: " + System.getProperty("os.name"));
-        System.out.println("Java Version: " + System.getProperty("java.version"));
-
+        
         try {
-            new Main().run(); // Create and run application
+            new Main().run();
         } catch (Exception e) {
             System.err.println("Application error:");
             e.printStackTrace();
@@ -130,12 +244,14 @@ public class Main {
         }
     }
 
-    // ========== WINDOW CLASS (Window) ==========
-    // Responsible for creating and managing GLFW window
+    public String getCurrentProjectName() {
+        return currentProjectName;
+    }
+
     private static class Window {
-        private long glfwWindow;   // GLFW window pointer
-        private int width, height; // Window dimensions
-        private String title;      // Window title
+        private long glfwWindow;
+        private int width, height;
+        private String title;
 
         public Window(int width, int height, String title) {
             this.width = width;
@@ -144,35 +260,29 @@ public class Main {
             initialize();
         }
 
-        // Initialize window
         private void initialize() {
-            setupGLFW();      // Configure GLFW
-            createWindow();   // Create window
-            setupOpenGL();    // Configure OpenGL
-            showWindow();     // Show window
+            setupGLFW();
+            createWindow();
+            setupOpenGL();
+            showWindow();
         }
 
-        // Configure GLFW library
         private void setupGLFW() {
-            // Set up GLFW error handler
             GLFWErrorCallback.createPrint(System.err).set();
             
-            // Initialize GLFW
             if (!glfwInit()) {
                 throw new IllegalStateException("Failed to initialize GLFW");
             }
 
-            // Configure window parameters
             glfwDefaultWindowHints();
-            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);      // Hide window initially
-            glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);     // Allow resizing
-            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); // OpenGL 3.3 version
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+            glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // Core profile
-            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE); // Compatibility
+            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
         }
 
-        // Create GLFW window
         private void createWindow() {
             glfwWindow = glfwCreateWindow(width, height, title, NULL, NULL);
             if (glfwWindow == NULL) {
@@ -180,74 +290,57 @@ public class Main {
             }
         }
 
-        // Configure OpenGL context
         private void setupOpenGL() {
-            glfwMakeContextCurrent(glfwWindow); // Make context current
-            GL.createCapabilities();            // Create OpenGL capabilities
+            glfwMakeContextCurrent(glfwWindow);
+            GL.createCapabilities();
             
-            // Enable depth test for correct 3D display
             glEnable(GL_DEPTH_TEST);
-            
-            // Set screen clear color (dark gray)
             glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-            
-            // Enable vertical sync
             glfwSwapInterval(1);
         }
 
-        // Show window to user
         private void showWindow() {
-            updateFramebufferSize(); // Update framebuffer size
-            glfwShowWindow(glfwWindow); // Show window
+            updateFramebufferSize();
+            glfwShowWindow(glfwWindow);
         }
 
-        // Update render area size
         public void updateFramebufferSize() {
             IntBuffer widthBuffer = BufferUtils.createIntBuffer(1);
             IntBuffer heightBuffer = BufferUtils.createIntBuffer(1);
             
-            // Get actual framebuffer size
             glfwGetFramebufferSize(glfwWindow, widthBuffer, heightBuffer);
             width = widthBuffer.get(0);
             height = heightBuffer.get(0);
             
-            // Set render area
             glViewport(0, 0, width, height);
         }
 
-        // Check if window close requested
         public boolean shouldClose() {
             return glfwWindowShouldClose(glfwWindow);
         }
 
-        // Swap buffers (show frame)
         public void swapBuffers() {
             glfwSwapBuffers(glfwWindow);
         }
 
-        // Clean window resources
         public void cleanup() {
-            glfwFreeCallbacks(glfwWindow); // Free callbacks
-            glfwDestroyWindow(glfwWindow); // Destroy window
-            glfwTerminate();               // Terminate GLFW
+            glfwFreeCallbacks(glfwWindow);
+            glfwDestroyWindow(glfwWindow);
+            glfwTerminate();
             
-            // Free error handler
             GLFWErrorCallback callback = glfwSetErrorCallback(null);
             if (callback != null) callback.free();
         }
 
-        // Getters
         public long getGLFWWindow() { return glfwWindow; }
         public int getWidth() { return width; }
         public int getHeight() { return height; }
     }
 
-    // ========== RENDERER CLASS (Renderer) ==========
-    // Manages all graphics rendering
     private static class Renderer {
-        private ShaderManager shaderManager;     // Shader manager
-        private GeometryManager geometryManager; // Geometry manager
-        private ObjectPicker objectPicker;       // Object selection system
+        private ShaderManager shaderManager;
+        private GeometryManager geometryManager;
+        private ObjectPicker objectPicker;
 
         public Renderer() {
             shaderManager = new ShaderManager();
@@ -255,33 +348,26 @@ public class Main {
             objectPicker = new ObjectPicker();
         }
 
-        // Start frame rendering
         public void beginFrame() {
-            // Clear color and depth buffers
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
 
-        // Render 3D scene
         public void renderScene(Scene scene, Window window) {
             scene.render(shaderManager, geometryManager, window);
         }
 
-        // End frame rendering (place for post-processing)
         public void endFrame() {
-            // Post-processing can go here
+            // Пост-обработка
         }
 
-        // Select object by mouse coordinates - ИСПРАВЛЕННЫЙ МЕТОД
         public GameObject performPicking(Scene scene, Window window, int mouseX, int mouseY) {
             return objectPicker.performPicking(scene, shaderManager, geometryManager, window, mouseX, mouseY);
         }
         
-        // Get world position by mouse coordinates (for 3D cursor)
         public float[] performCursorRaycast(Scene scene, Window window, int mouseX, int mouseY) {
             return objectPicker.performRaycast(scene, window, mouseX, mouseY);
         }
 
-        // Clean graphics resources
         public void cleanup() {
             if (shaderManager != null) shaderManager.cleanup();
             if (geometryManager != null) geometryManager.cleanup();
@@ -289,40 +375,33 @@ public class Main {
         }
     }
 
-    // ========== INPUT HANDLER CLASS (InputHandler) ==========
-    // Handles all user actions (keyboard, mouse)
     private static class InputHandler {
-        private Window window;      // Window for input handling
-        private Scene scene;        // Scene for interaction
-        private Renderer renderer;  // Renderer for object selection
+        private Window window;
+        private Scene scene;
+        private Renderer renderer;
         
-        // Key states
         private boolean[] keyStates = new boolean[GLFW_KEY_LAST + 1];
-        private boolean ctrlPressed = false;   // Ctrl pressed
-        private boolean shiftPressed = false;  // Shift pressed
-        private boolean altPressed = false;    // Alt pressed
+        private boolean ctrlPressed = false;
+        private boolean shiftPressed = false;
+        private boolean altPressed = false;
         
-        // Object creation menu
-        private boolean showCreationMenu = false; // Show creation menu
-        private double menuPosX, menuPosY;        // Menu position
+        private boolean showCreationMenu = false;
+        private double menuPosX, menuPosY;
         
-        // Mouse state
-        private double lastMouseX, lastMouseY;     // Last mouse position
-        private boolean isMouseRightPressed = false; // Right mouse button
-        private boolean isMouseLeftPressed = false;  // Left mouse button
-        private boolean isFirstMouseMovement = true; // First mouse movement
+        private double lastMouseX, lastMouseY;
+        private boolean isMouseRightPressed = false;
+        private boolean isMouseLeftPressed = false;
+        private boolean isFirstMouseMovement = true;
         
-        // Camera movement lock (during object transformations)
         private boolean cameraMovementLocked = false;
 
         public InputHandler(Window window, Scene scene, Renderer renderer) {
             this.window = window;
             this.scene = scene;
             this.renderer = renderer;
-            setupCallbacks(); // Set up event handlers
+            setupCallbacks();
         }
 
-        // Set up GLFW event handlers
         private void setupCallbacks() {
             glfwSetFramebufferSizeCallback(window.getGLFWWindow(), this::onFramebufferSize);
             glfwSetCursorPosCallback(window.getGLFWWindow(), this::onCursorPos);
@@ -331,19 +410,16 @@ public class Main {
             glfwSetKeyCallback(window.getGLFWWindow(), this::onKey);
         }
 
-        // Window resize handler
         private void onFramebufferSize(long window, int width, int height) {
             if (width > 0 && height > 0) {
                 this.window.updateFramebufferSize();
                 
-                // Update ImGui dimensions
                 ImGuiIO io = ImGui.getIO();
                 io.setDisplaySize(width, height);
                 io.setDisplayFramebufferScale(1.0f, 1.0f);
             }
         }
 
-        // Mouse movement handler
         private void onCursorPos(long window, double xpos, double ypos) {
             ImGuiIO io = ImGui.getIO();
             if (!io.getWantCaptureMouse()) {
@@ -354,42 +430,38 @@ public class Main {
             lastMouseY = ypos;
         }
 
-        // Mouse button press handler - ИСПРАВЛЕННЫЙ ВЫЗОВ
         private void onMouseButton(long window, int button, int action, int mods) {
             ImGuiIO io = ImGui.getIO();
             if (!io.getWantCaptureMouse()) {
                 handleMouseButton(button, action);
                 
-                // LMB: object selection or 3D cursor placement
                 if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-                    if (scene.getSelectionMode() == Scene.SelectionMode.STANDARD) {
-                        // Standard selection mode: select object
+                    // Если в режиме 3D курсора - перемещаем курсор
+                    if (scene.getSelectionMode() == Scene.SelectionMode.CURSOR_3D) {
+                        float[] intersection = renderer.performCursorRaycast(scene, this.window, (int)lastMouseX, (int)lastMouseY);
+                        scene.setCursor3DPosition(intersection[0], intersection[1], intersection[2]);
+                        System.out.println("Cursor moved to: (" + intersection[0] + ", " + intersection[1] + ", " + intersection[2] + ")");
+                    } else {
+                        // Стандартный режим - выбираем объект
                         GameObject selected = renderer.performPicking(scene, this.window, (int)lastMouseX, (int)lastMouseY);
                         scene.setSelectedObject(selected);
-                    } else if (scene.getSelectionMode() == Scene.SelectionMode.CURSOR_3D) {
-                        // 3D cursor mode: set cursor position
-                        float[] cursorPos = renderer.performCursorRaycast(scene, this.window, (int)lastMouseX, (int)lastMouseY);
-                        if (cursorPos != null) {
-                            scene.setCursor3DPosition(cursorPos[0], cursorPos[1], cursorPos[2]);
-                            System.out.println("3D Cursor set to: (" + cursorPos[0] + ", " + cursorPos[1] + ", " + cursorPos[2] + ")");
+                        
+                        if (selected != null) {
+                            System.out.println("Selected: " + selected.getName());
                         }
                     }
                 }
             }
         }
 
-        // Mouse wheel scroll handler
         private void onScroll(long window, double xoffset, double yoffset) {
             ImGuiIO io = ImGui.getIO();
             if (!io.getWantCaptureMouse()) {
-                // Pass scroll to camera controller
                 scene.getCameraController().handleScroll(yoffset);
             }
         }
 
-        // Keyboard key press handler
         private void onKey(long window, int key, int scancode, int action, int mods) {
-            // Update modifier states
             if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) {
                 ctrlPressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
                 cameraMovementLocked = ctrlPressed;
@@ -401,26 +473,21 @@ public class Main {
                 altPressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
             }
             
-            // Save all key states
             if (key >= 0 && key < keyStates.length) {
                 keyStates[key] = (action == GLFW_PRESS || action == GLFW_REPEAT);
             }
             
-            // Handle key presses
             if (action == GLFW_PRESS) {
                 handleKeyPress(key, mods);
             }
             
-            // Unlock camera movement when Ctrl is released
             if (action == GLFW_RELEASE && (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL)) {
                 cameraMovementLocked = false;
             }
         }
 
-        // Handle mouse movement
         private void handleMouseMove(double xpos, double ypos) {
             if (isMouseRightPressed) {
-                // Camera rotation when right mouse button is held
                 if (isFirstMouseMovement) {
                     lastMouseX = xpos;
                     lastMouseY = ypos;
@@ -428,44 +495,33 @@ public class Main {
                 }
 
                 double xoffset = xpos - lastMouseX;
-                double yoffset = lastMouseY - ypos; // Reverse sign for natural rotation
+                double yoffset = lastMouseY - ypos;
                 lastMouseX = xpos;
                 lastMouseY = ypos;
 
                 scene.getCameraController().handleMouseMovement(xoffset, yoffset);
-            } else if (isMouseLeftPressed && scene.getSelectedObject() != null) {
-                // Transform objects when left mouse button is held
+            } else if (isMouseLeftPressed && scene.getSelectedObject() != null && 
+                      scene.getSelectionMode() == Scene.SelectionMode.STANDARD) {
                 GameObject selected = scene.getSelectedObject();
                 float xoffset = (float) (xpos - lastMouseX) * 0.01f;
                 float yoffset = (float) (lastMouseY - ypos) * 0.01f;
                 lastMouseX = xpos;
                 lastMouseY = ypos;
 
-                // Depending on active transformation mode
                 if (scene.isTranslating()) {
-                    // Move object
                     Camera camera = scene.getCameraController().getCamera();
-                    
                     float[] right = camera.getRightVector();
-                    float[] front = camera.getFrontVector();
+                    float[] up = camera.getUpVector();
                     
-                    // Horizontal movement (X and Z axes)
-                    selected.getPosition()[0] += right[0] * xoffset;
-                    selected.getPosition()[2] += right[2] * xoffset;
+                    selected.translate(right[0] * xoffset, up[1] * yoffset, right[2] * xoffset);
                     
-                    // Vertical movement (Y axis)
-                    selected.getPosition()[1] -= yoffset;
-                    
-                    // Don't let object go below ground
                     if (selected.getPosition()[1] < 0.1f) {
                         selected.getPosition()[1] = 0.1f;
                     }
                 } else if (scene.isRotating()) {
-                    // Rotate object
-                    selected.rotateY(xoffset * 50.0f); // Rotate around Y
-                    selected.rotateX(yoffset * 50.0f); // Rotate around X
+                    selected.rotateY(xoffset * 100.0f);
+                    selected.rotateX(yoffset * 100.0f);
                 } else if (scene.isScaling()) {
-                    // Scale object
                     float scaleFactor = 1.0f + yoffset;
                     selected.scale(scaleFactor);
                 }
@@ -474,16 +530,13 @@ public class Main {
             }
         }
 
-        // Handle mouse button presses
         private void handleMouseButton(int button, int action) {
             if (button == GLFW_MOUSE_BUTTON_RIGHT) {
                 isMouseRightPressed = (action == GLFW_PRESS);
                 if (isMouseRightPressed) {
-                    // Hide cursor during camera rotation
                     glfwSetInputMode(window.getGLFWWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
                     isFirstMouseMovement = true;
                 } else {
-                    // Restore cursor
                     glfwSetInputMode(window.getGLFWWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                 }
             } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
@@ -491,25 +544,19 @@ public class Main {
             }
         }
 
-        // Handle keyboard key presses
         private void handleKeyPress(int key, int mods) {
-            // Close creation menu with Escape
             if (showCreationMenu && key == GLFW_KEY_ESCAPE) {
                 showCreationMenu = false;
-                System.out.println("Creation menu closed");
                 return;
             }
             
-            // Handle special keys
             switch (key) {
                 case GLFW_KEY_ESCAPE:
-                    // Escape: reset transformations or cancel selection
                     scene.handleEscape();
                     break;
                     
-                case GLFW_KEY_T:
+                case GLFW_KEY_G:
                     if (ctrlPressed) {
-                        // Ctrl+T: toggle translation mode
                         scene.toggleTranslationMode();
                         cameraMovementLocked = true;
                     }
@@ -517,15 +564,13 @@ public class Main {
                     
                 case GLFW_KEY_R:
                     if (ctrlPressed) {
-                        // Ctrl+R: toggle rotation mode
                         scene.toggleRotationMode();
                         cameraMovementLocked = true;
                     }
                     break;
                     
                 case GLFW_KEY_S:
-                    if (ctrlPressed && shiftPressed) {
-                        // Ctrl+Shift+S: toggle scaling mode
+                    if (ctrlPressed) {
                         scene.toggleScalingMode();
                         cameraMovementLocked = true;
                     }
@@ -533,80 +578,69 @@ public class Main {
                     
                 case GLFW_KEY_A:
                     if (shiftPressed) {
-                        // Shift+A: open object creation menu
                         showCreationMenu = true;
                         menuPosX = lastMouseX;
                         menuPosY = lastMouseY;
-                        System.out.println("Creation menu opened at (" + menuPosX + ", " + menuPosY + ")");
                     }
                     break;
                     
-                case GLFW_KEY_SPACE:
-                    // Space: attach 3D cursor to selected object
-                    if (scene.getSelectedObject() != null && scene.getSelectionMode() == Scene.SelectionMode.STANDARD) {
-                        float[] objPos = scene.getSelectedObject().getPosition();
-                        scene.setCursor3DPosition(objPos[0], objPos[1], objPos[2]);
-                        System.out.println("3D Cursor attached to selected object");
+                case GLFW_KEY_C:
+                    if (shiftPressed) {
+                        scene.toggle3DCursorVisibility();
                     }
+                    break;
+                    
+                case GLFW_KEY_DELETE:
+                    scene.removeSelectedObject();
                     break;
             }
         }
 
-        // Process GLFW events
         public void pollEvents() {
             glfwPollEvents();
         }
 
-        // Update input handler state
         public void update(float deltaTime) {
-            // Update camera movement by keys if not locked
             if (!cameraMovementLocked) {
                 scene.getCameraController().updateMovement(keyStates, deltaTime);
             }
         }
         
-        // Getters and setters
         public boolean isShowCreationMenu() { return showCreationMenu; }
         public double getMenuPosX() { return menuPosX; }
         public double getMenuPosY() { return menuPosY; }
         public void setShowCreationMenu(boolean show) { this.showCreationMenu = show; }
+        public void setScene(Scene scene) { this.scene = scene; }
     }
 
-    // ========== SCENE CLASS (Scene) ==========
-    // Contains all 3D scene objects and manages them
-    private static class Scene {
-        // Selection modes (like in Blender)
+    public static class Scene {
         public enum SelectionMode {
-            STANDARD,      // Standard object selection mode
-            CURSOR_3D      // 3D cursor operation mode
+            STANDARD,
+            CURSOR_3D
         }
         
-        private CameraController cameraController; // Camera controller
-        private List<GameObject> gameObjects;      // List of all scene objects
-        private GameObject selectedObject;         // Selected object
+        private CameraController cameraController;
+        private List<GameObject> gameObjects;
+        private GameObject selectedObject;
         
-        // Object transformation modes
-        private boolean isTranslating = false; // Translation mode
-        private boolean isRotating = false;    // Rotation mode
-        private boolean isScaling = false;     // Scaling mode
+        private boolean isTranslating = false;
+        private boolean isRotating = false;
+        private boolean isScaling = false;
         
-        private int nextObjectId = 6; // ID counter for new objects
+        private int nextObjectId = 6;
         
-        // 3D Cursor (Blender-like)
-        private SelectionMode selectionMode = SelectionMode.STANDARD; // Current mode
-        private float[] cursor3DPosition = {0.0f, 0.5f, 0.0f}; // Cursor position in world
-        private boolean showCursor = true; // Cursor visibility
-        private float cursorSize = 0.5f;   // Cursor size
+        private SelectionMode selectionMode = SelectionMode.STANDARD;
+        private float[] cursor3DPosition = {0.0f, 0.5f, 0.0f};
+        private boolean showCursor = true;
+        private float cursorSize = 0.5f;
 
         public Scene() {
-            cameraController = new CameraController(); // Create camera controller
-            gameObjects = new ArrayList<>();          // Initialize object list
-            createDefaultScene();                     // Create starting scene
+            cameraController = new CameraController();
+            gameObjects = new ArrayList<>();
+            createDefaultScene();
         }
 
-        // Create starting scene with test objects
         private void createDefaultScene() {
-            // Materials for different objects (like Blender)
             Material[] materials = {
                 new Material(new float[]{0.19225f, 0.19225f, 0.19225f}, new float[]{0.50754f, 0.50754f, 0.50754f}, new float[]{0.508273f, 0.508273f, 0.508273f}, 0.4f),
                 new Material(new float[]{0.25f, 0.25f, 0.25f}, new float[]{0.4f, 0.4f, 0.4f}, new float[]{0.774597f, 0.774597f, 0.774597f}, 0.6f),
@@ -614,24 +648,19 @@ public class Main {
                 new Material(new float[]{0.0f, 0.1f, 0.06f}, new float[]{0.0f, 0.50980392f, 0.50980392f}, new float[]{0.50196078f, 0.50196078f, 0.50196078f}, 0.25f)
             };
 
-            // Create 4 standard cubes
             gameObjects.add(new GameObject(-2.0f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, materials[0], 1, GameObject.Type.REGULAR, "Cube_1"));
             gameObjects.add(new GameObject(0.0f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, materials[1], 2, GameObject.Type.REGULAR, "Cube_2"));
             gameObjects.add(new GameObject(2.0f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, materials[2], 3, GameObject.Type.REGULAR, "Cube_3"));
             gameObjects.add(new GameObject(0.0f, 0.5f, -2.0f, 1.0f, 1.0f, 1.0f, materials[3], 4, GameObject.Type.REGULAR, "Cube_4"));
             
-            // Create light source
-            gameObjects.add(new GameObject(2.0f, 3.0f, 2.0f, 0.2f, 0.2f, 0.2f, null, 5, GameObject.Type.LIGHT, "Light_1"));
+            gameObjects.add(new GameObject(2.0f, 3.0f, 2.0f, 0.5f, 0.5f, 0.5f, null, 5, GameObject.Type.LIGHT, "Light_1"));
             
-            // Initialize 3D cursor position at scene center
             cursor3DPosition[0] = 0.0f;
             cursor3DPosition[1] = 0.5f;
             cursor3DPosition[2] = 0.0f;
         }
         
-        // Create new object in scene
         public void createObject(GameObject.Type type, String baseName) {
-            // Objects are created at 3D cursor position (like in Blender)
             float x = cursor3DPosition[0];
             float y = cursor3DPosition[1];
             float z = cursor3DPosition[2];
@@ -639,9 +668,7 @@ public class Main {
             Material material = null;
             float scale = 1.0f;
             
-            // Settings depending on object type
             if (type == GameObject.Type.REGULAR) {
-                // Random material for cube
                 material = new Material(
                     new float[]{(float)Math.random() * 0.5f, (float)Math.random() * 0.5f, (float)Math.random() * 0.5f},
                     new float[]{(float)Math.random() * 0.5f + 0.5f, (float)Math.random() * 0.5f + 0.5f, (float)Math.random() * 0.5f + 0.5f},
@@ -650,45 +677,39 @@ public class Main {
                 );
                 scale = 1.0f;
             } else if (type == GameObject.Type.LIGHT) {
-                scale = 0.2f;
+                scale = 0.5f;
             }
             
-            // Create unique name for object
             String name = baseName + "_" + nextObjectId;
             GameObject newObject = new GameObject(x, y, z, scale, scale, scale, material, nextObjectId, type, name);
             gameObjects.add(newObject);
             nextObjectId++;
             
-            // In cursor mode, automatically select created object
             if (selectionMode == SelectionMode.CURSOR_3D) {
                 selectedObject = newObject;
             }
             
-            System.out.println("New object created at 3D Cursor: " + name + " at position (" + x + ", " + y + ", " + z + ")");
+            System.out.println("Created: " + name + " at (" + x + ", " + y + ", " + z + ")");
         }
 
-        // Update scene state (called each frame)
         public void update(float deltaTime) {
-            // Animations or other dynamic changes can be added here
+            // Анимации
         }
 
-        // Render entire scene
         public void render(ShaderManager shaderManager, GeometryManager geometryManager, Window window) {
-            shaderManager.useMainShader(); // Use main shader
-            setupCameraUniforms(shaderManager, window); // Set camera parameters
-            setupLightingUniforms(shaderManager);       // Set lighting parameters
+            shaderManager.useMainShader();
+            setupCameraUniforms(shaderManager, window);
+            setupLightingUniforms(shaderManager);
             
-            renderGrid(shaderManager, geometryManager);      // Render grid
-            renderObjects(shaderManager, geometryManager);   // Render objects
-            renderSelectionOutline(shaderManager, geometryManager); // Selection outline
+            renderGrid(shaderManager, geometryManager);
+            renderObjects(shaderManager, geometryManager);
+            renderSelectionOutline(shaderManager, geometryManager);
             
-            // Render 3D cursor if enabled
             if (showCursor) {
                 render3DCursor(shaderManager, geometryManager, window);
             }
         }
 
-        // Set camera uniform variables in shader
         private void setupCameraUniforms(ShaderManager shaderManager, Window window) {
             Camera camera = cameraController.getCamera();
             shaderManager.setViewMatrix(camera.getViewMatrix());
@@ -696,9 +717,7 @@ public class Main {
             shaderManager.setViewPos(camera.getPosition());
         }
 
-        // Set lighting uniform variables in shader
         private void setupLightingUniforms(ShaderManager shaderManager) {
-            // Find first light source in scene
             GameObject light = gameObjects.stream()
                 .filter(obj -> obj.getType() == GameObject.Type.LIGHT)
                 .findFirst()
@@ -706,139 +725,132 @@ public class Main {
                 
             if (light != null) {
                 shaderManager.setLightPosition(light.getPosition());
+                shaderManager.setLightProperties(
+                    new float[]{0.2f, 0.2f, 0.2f},
+                    new float[]{0.8f, 0.8f, 0.8f},
+                    new float[]{1.0f, 1.0f, 1.0f}
+                );
+            } else {
+                // Если нет источника света, используем значения по умолчанию
+                shaderManager.setLightPosition(new float[]{2.0f, 3.0f, 2.0f});
+                shaderManager.setLightProperties(
+                    new float[]{0.2f, 0.2f, 0.2f},
+                    new float[]{0.8f, 0.8f, 0.8f},
+                    new float[]{1.0f, 1.0f, 1.0f}
+                );
             }
-            
-            // Set light parameters
-            shaderManager.setLightProperties(
-                new float[]{0.2f, 0.2f, 0.2f},      // Ambient
-                new float[]{0.8f, 0.8f, 0.8f},      // Diffuse
-                new float[]{1.0f, 1.0f, 1.0f}       // Specular
-            );
         }
 
-        // Render coordinate grid
         private void renderGrid(ShaderManager shaderManager, GeometryManager geometryManager) {
-            shaderManager.setUseLighting(false);    // Disable lighting for grid
-            shaderManager.setObjectColor(0.3f, 0.3f, 0.3f); // Gray color
-            geometryManager.renderGrid();           // Render grid
-            shaderManager.setUseLighting(true);     // Enable lighting back
+            shaderManager.setUseLighting(false);
+            shaderManager.setObjectColor(0.3f, 0.3f, 0.3f);
+            geometryManager.renderGrid();
+            shaderManager.setUseLighting(true);
         }
 
-        // Render all scene objects
         private void renderObjects(ShaderManager shaderManager, GeometryManager geometryManager) {
             for (GameObject obj : gameObjects) {
                 if (obj.getType() == GameObject.Type.REGULAR) {
-                    // Regular objects with materials and lighting
                     shaderManager.setMaterial(obj.getMaterial());
                     shaderManager.setObjectColor(1.0f, 1.0f, 1.0f);
                     geometryManager.renderCube(obj.getModelMatrix());
                 } else {
-                    // Light sources without lighting (they glow themselves)
                     shaderManager.setUseLighting(false);
-                    shaderManager.setObjectColor(1.0f, 1.0f, 0.0f); // Yellow color
+                    shaderManager.setObjectColor(1.0f, 1.0f, 0.0f);
                     geometryManager.renderLight(obj.getModelMatrix());
                     shaderManager.setUseLighting(true);
                 }
             }
         }
 
-        // Render outline of selected object
         private void renderSelectionOutline(ShaderManager shaderManager, GeometryManager geometryManager) {
             if (selectedObject != null && selectionMode == SelectionMode.STANDARD) {
                 geometryManager.renderOutline(selectedObject, shaderManager);
             }
         }
         
-        // Render 3D cursor
         private void render3DCursor(ShaderManager shaderManager, GeometryManager geometryManager, Window window) {
             geometryManager.render3DCursor(cursor3DPosition, cursorSize, shaderManager, 
                                           cameraController.getCamera(), window);
         }
 
-        // Toggle translation mode
         public void toggleTranslationMode() {
             if (selectedObject != null && selectionMode == SelectionMode.STANDARD) {
                 isTranslating = !isTranslating;
                 isRotating = false;
                 isScaling = false;
-                System.out.println("Translation mode: " + (isTranslating ? "ON" : "OFF"));
-            } else {
-                System.out.println("No object selected for translation");
+                System.out.println("Translation: " + (isTranslating ? "ON" : "OFF"));
             }
         }
 
-        // Toggle rotation mode
         public void toggleRotationMode() {
             if (selectedObject != null && selectionMode == SelectionMode.STANDARD) {
                 isRotating = !isRotating;
                 isTranslating = false;
                 isScaling = false;
-                System.out.println("Rotation mode: " + (isRotating ? "ON" : "OFF"));
-            } else {
-                System.out.println("No object selected for rotation");
+                System.out.println("Rotation: " + (isRotating ? "ON" : "OFF"));
             }
         }
 
-        // Toggle scaling mode
         public void toggleScalingMode() {
             if (selectedObject != null && selectionMode == SelectionMode.STANDARD) {
                 isScaling = !isScaling;
                 isTranslating = false;
                 isRotating = false;
-                System.out.println("Scaling mode: " + (isScaling ? "ON" : "OFF"));
-            } else {
-                System.out.println("No object selected for scaling");
+                System.out.println("Scaling: " + (isScaling ? "ON" : "OFF"));
             }
         }
         
-        // Set selection mode
         public void setSelectionMode(SelectionMode mode) {
             this.selectionMode = mode;
-            System.out.println("Selection mode changed to: " + mode);
+            System.out.println("Selection Mode: " + mode);
         }
         
-        // Toggle 3D cursor visibility
         public void toggle3DCursorVisibility() {
             showCursor = !showCursor;
-            System.out.println("3D Cursor visibility: " + (showCursor ? "ON" : "OFF"));
+            System.out.println("3D Cursor: " + (showCursor ? "ON" : "OFF"));
         }
         
-        // Set 3D cursor position
         public void setCursor3DPosition(float x, float y, float z) {
             cursor3DPosition[0] = x;
-            cursor3DPosition[1] = y;
+            cursor3DPosition[1] = Math.max(0.1f, y);
             cursor3DPosition[2] = z;
         }
         
-        // Reset 3D cursor to origin
         public void resetCursorToOrigin() {
             cursor3DPosition[0] = 0.0f;
             cursor3DPosition[1] = 0.5f;
             cursor3DPosition[2] = 0.0f;
-            System.out.println("3D Cursor reset to origin");
+            System.out.println("Cursor reset");
         }
 
-        // Handle Escape key
         public void handleEscape() {
             if (isTranslating || isRotating || isScaling) {
-                // Reset all transformation modes
                 isTranslating = false;
                 isRotating = false;
                 isScaling = false;
-                System.out.println("All transformation modes disabled");
+                System.out.println("Transformations disabled");
             } else if (selectedObject != null && selectionMode == SelectionMode.STANDARD) {
-                // Cancel object selection
                 selectedObject = null;
-                System.out.println("Object deselected");
+                System.out.println("Deselected");
+            }
+        }
+        
+        public void removeSelectedObject() {
+            if (selectedObject != null) {
+                gameObjects.remove(selectedObject);
+                System.out.println("Removed: " + selectedObject.getName());
+                selectedObject = null;
             }
         }
 
-        // Clean scene resources
         public void cleanup() {
-            // Object resources can be freed here
+            for (GameObject obj : gameObjects) {
+                obj.cleanup();
+            }
+            gameObjects.clear();
         }
 
-        // ========== GETTERS ==========
         public CameraController getCameraController() { return cameraController; }
         public List<GameObject> getGameObjects() { return gameObjects; }
         public GameObject getSelectedObject() { return selectedObject; }
@@ -848,71 +860,158 @@ public class Main {
         public boolean isScaling() { return isScaling; }
         public float[] getCursor3DPosition() { return cursor3DPosition; }
         public boolean isCursorVisible() { return showCursor; }
+        public int getNextObjectId() { return nextObjectId; }
+        public void setNextObjectId(int id) { this.nextObjectId = id; }
         
-        // ========== SETTERS ==========
         public void setSelectedObject(GameObject selectedObject) { 
             this.selectedObject = selectedObject;
             if (selectedObject != null) {
-                System.out.println("Object selected: " + selectedObject.getName());
+                System.out.println("Selected: " + selectedObject.getName());
             }
         }
+        
+        public void updateSelectedObjectPosition(float x, float y, float z) {
+            if (selectedObject != null) {
+                selectedObject.setPosition(x, y, z);
+            }
+        }
+        
+        public void updateSelectedObjectRotation(float x, float y, float z) {
+            if (selectedObject != null) {
+                selectedObject.setRotation(x, y, z);
+            }
+        }
+        
+        public void updateSelectedObjectScale(float x, float y, float z) {
+            if (selectedObject != null) {
+                selectedObject.setScale(x, y, z);
+            }
+        }
+        
+        public void setTranslationMode(boolean translating) { this.isTranslating = translating; }
+        public void setRotationMode(boolean rotating) { this.isRotating = rotating; }
+        public void setScalingMode(boolean scaling) { this.isScaling = scaling; }
+        public void setCursorVisible(boolean visible) { this.showCursor = visible; }
     }
 
-    // ========== UI MANAGER CLASS (UIManager) ==========
-    // Manages user interface (ImGui)
     private static class UIManager {
-        private final ImGuiImplGlfw imGuiGlfw = new ImGuiImplGlfw(); // ImGui integration with GLFW
-        private final ImGuiImplGl3 imGuiGl3 = new ImGuiImplGl3();    // ImGui integration with OpenGL
-        private Window window;    // Window for UI positioning
-        private Scene scene;      // Scene for interaction
-        private InputHandler inputHandler; // Input handler
+        private final ImGuiImplGlfw imGuiGlfw = new ImGuiImplGlfw();
+        private final ImGuiImplGl3 imGuiGl3 = new ImGuiImplGl3();
+        private Window window;
+        private Scene scene;
+        private InputHandler inputHandler;
+        private ProjectFileManager projectFileManager;
+        private Main mainApp;
+        
+        private float[] tempPos = new float[3];
+        private float[] tempRot = new float[3];
+        private float[] tempScale = new float[3];
 
-        public UIManager(Window window, Scene scene, InputHandler inputHandler) {
+        public UIManager(Window window, Scene scene, InputHandler inputHandler, 
+                        ProjectFileManager projectFileManager, Main mainApp) {
             this.window = window;
             this.scene = scene;
             this.inputHandler = inputHandler;
-            initialize(); // Initialize ImGui
+            this.projectFileManager = projectFileManager;
+            this.mainApp = mainApp;
+            initialize();
         }
 
-        // Initialize ImGui
         private void initialize() {
-            ImGui.createContext(); // Create ImGui context
+            ImGui.createContext();
             ImGuiIO io = ImGui.getIO();
-            io.setIniFilename(null); // Don't save settings to file
-            io.addConfigFlags(ImGuiConfigFlags.NavEnableKeyboard); // Enable keyboard navigation
+            io.setIniFilename(null);
+            io.addConfigFlags(ImGuiConfigFlags.NavEnableKeyboard);
 
-            // Set render area dimensions
             io.setDisplaySize(window.getWidth(), window.getHeight());
             io.setDisplayFramebufferScale(1.0f, 1.0f);
 
-            // Initialize ImGui integrations
             imGuiGlfw.init(window.getGLFWWindow(), true);
             imGuiGl3.init(null);
             
-            // Set dark theme
             ImGui.styleColorsDark();
         }
 
-        // Render all UI
-        public void render(float fps) {
-            // Start new ImGui frame
+        public void render(float fps, String projectName) {
             imGuiGlfw.newFrame();
             ImGui.newFrame();
 
-            // Render UI components
-            renderFPSOverlay(fps);      // FPS overlay
-            renderModeSelector();       // Mode selection buttons (left)
-            renderObjectTree();         // Object tree (right)
-            renderCreationMenu();       // Object creation menu
+            renderMainMenuBar(projectName);
+            renderFPSOverlay(fps);
+            renderModeSelector();
+            renderObjectTree();
+            renderObjectProperties();
+            renderCreationMenu();
 
-            // Complete ImGui rendering
             ImGui.render();
             imGuiGl3.renderDrawData(ImGui.getDrawData());
         }
+        
+        private void renderMainMenuBar(String projectName) {
+            if (ImGui.beginMainMenuBar()) {
+                if (ImGui.beginMenu("File")) {
+                    if (ImGui.menuItem("New", "Ctrl+N")) {
+                        mainApp.newProject();
+                    }
+                    if (ImGui.menuItem("Open...", "Ctrl+O")) {
+                        mainApp.openProject();
+                    }
+                    ImGui.separator();
+                    if (ImGui.menuItem("Save", "Ctrl+S")) {
+                        mainApp.saveProject();
+                    }
+                    if (ImGui.menuItem("Save As...", "Ctrl+Shift+S")) {
+                        mainApp.saveProjectAs();
+                    }
+                    ImGui.separator();
+                    if (ImGui.menuItem("Exit", "Alt+F4")) {
+                        glfwSetWindowShouldClose(window.getGLFWWindow(), true);
+                    }
+                    ImGui.endMenu();
+                }
+                
+                if (ImGui.beginMenu("Edit")) {
+                    if (ImGui.menuItem("Undo", "Ctrl+Z")) {
+                        // TODO: Implement undo
+                    }
+                    if (ImGui.menuItem("Redo", "Ctrl+Y")) {
+                        // TODO: Implement redo
+                    }
+                    ImGui.separator();
+                    if (ImGui.menuItem("Cut", "Ctrl+X")) {
+                        // TODO: Implement cut
+                    }
+                    if (ImGui.menuItem("Copy", "Ctrl+C")) {
+                        // TODO: Implement copy
+                    }
+                    if (ImGui.menuItem("Paste", "Ctrl+V")) {
+                        // TODO: Implement paste
+                    }
+                    if (ImGui.menuItem("Delete", "Del")) {
+                        scene.removeSelectedObject();
+                    }
+                    ImGui.endMenu();
+                }
+                
+                if (ImGui.beginMenu("View")) {
+                    if (ImGui.menuItem("Toggle 3D Cursor", "Shift+C")) {
+                        scene.toggle3DCursorVisibility();
+                    }
+                    if (ImGui.menuItem("Reset Camera", "F1")) {
+                        scene.getCameraController().resetCamera();
+                    }
+                    ImGui.endMenu();
+                }
+                
+                ImGui.sameLine(ImGui.getWindowWidth() - 200);
+                ImGui.text("Project: " + projectName);
+                
+                ImGui.endMainMenuBar();
+            }
+        }
 
-        // FPS overlay in top left corner
         private void renderFPSOverlay(float fps) {
-            ImGui.setNextWindowPos(10, 10, ImGuiCond.Always);
+            ImGui.setNextWindowPos(10, 40, ImGuiCond.Always);
             ImGui.setNextWindowSize(100, 30, ImGuiCond.Always);
             ImGui.begin("FPS Overlay", 
                 ImGuiWindowFlags.NoTitleBar | 
@@ -924,15 +1023,12 @@ public class Main {
             ImGui.end();
         }
         
-        // Mode selection buttons (left, without window)
         private void renderModeSelector() {
-            // Position buttons in top left corner under FPS
             float xPos = 10;
-            float yPos = 50;
+            float yPos = 80;
             
-            // Create transparent window without background and title
             ImGui.setNextWindowPos(xPos, yPos, ImGuiCond.Always);
-            ImGui.setNextWindowSize(150, 90, ImGuiCond.Always);
+            ImGui.setNextWindowSize(150, 180, ImGuiCond.Always);
             
             ImGui.begin("##ModeSelector", 
                 ImGuiWindowFlags.NoTitleBar | 
@@ -941,62 +1037,132 @@ public class Main {
                 ImGuiWindowFlags.NoBackground |
                 ImGuiWindowFlags.NoDecoration);
             
-            // Standard selection mode button
-            if (ImGui.button("Standard", 130, 30)) {
+            ImGui.text("Selection Mode:");
+            
+            if (ImGui.button("Standard", 130, 25)) {
                 scene.setSelectionMode(Scene.SelectionMode.STANDARD);
             }
             
-            // 3D cursor mode button
-            if (ImGui.button("3D Cursor", 130, 30)) {
+            if (ImGui.button("3D Cursor", 130, 25)) {
                 scene.setSelectionMode(Scene.SelectionMode.CURSOR_3D);
             }
             
-            // Current mode indicator (text)
-            String currentMode = scene.getSelectionMode() == Scene.SelectionMode.STANDARD ? 
-                "Mode: Standard" : "Mode: 3D Cursor";
-            ImGui.text(currentMode);
+            ImGui.separator();
+            ImGui.text("Cursor:");
+            
+            if (ImGui.button("Toggle (C)", 130, 25)) {
+                scene.toggle3DCursorVisibility();
+            }
+            
+            if (ImGui.button("Reset", 130, 25)) {
+                scene.resetCursorToOrigin();
+            }
             
             ImGui.end();
         }
 
-        // Object tree (right)
         private void renderObjectTree() {
-            float xPos = window.getWidth() - 320 - 10; // 10px from right edge
-            float yPos = 10;
+            float xPos = window.getWidth() - 320 - 10;
+            float yPos = 40;
             ImGui.setNextWindowPos(xPos, yPos, ImGuiCond.Always);
             ImGui.setNextWindowSize(320, 400, ImGuiCond.Always);
             
             ImGui.begin("Object Tree", ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove);
 
-            ImGui.text("Scene Objects:");
+            ImGui.text("Objects:");
             ImGui.separator();
 
-            // Display all scene objects as buttons
             for (GameObject obj : scene.getGameObjects()) {
                 String label = obj.getName();
                 
-                // Highlight selected object
                 if (obj == scene.getSelectedObject()) {
                     label = "> " + label + " <";
                 }
 
-                // Button for object selection
                 if (ImGui.button(label, ImGui.getContentRegionAvailX(), 0)) {
                     scene.setSelectedObject(obj);
-                    System.out.println("Selected from UI: " + obj.getName());
                 }
             }
 
             ImGui.end();
         }
         
-        // Object creation menu (appears when Shift+A is pressed)
+        private void renderObjectProperties() {
+            GameObject selected = scene.getSelectedObject();
+            
+            float xPos = window.getWidth() - 320 - 10;
+            float yPos = 450;
+            
+            ImGui.setNextWindowPos(xPos, yPos, ImGuiCond.Always);
+            ImGui.setNextWindowSize(320, 300, ImGuiCond.Always);
+            
+            ImGui.begin("Object Properties", ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove);
+            
+            if (selected != null) {
+                ImGui.text("Name: " + selected.getName());
+                ImGui.separator();
+                
+                float[] pos = selected.getPosition();
+                float[] rot = selected.getRotation();
+                float[] scale = selected.getScale();
+                
+                // Обновляем временные значения
+                tempPos[0] = pos[0];
+                tempPos[1] = pos[1];
+                tempPos[2] = pos[2];
+                
+                tempRot[0] = rot[0];
+                tempRot[1] = rot[1];
+                tempRot[2] = rot[2];
+                
+                tempScale[0] = scale[0];
+                tempScale[1] = scale[1];
+                tempScale[2] = scale[2];
+                
+                ImGui.text("Position:");
+                if (ImGui.inputFloat3("##Position", tempPos)) {
+                    scene.updateSelectedObjectPosition(tempPos[0], tempPos[1], tempPos[2]);
+                }
+                
+                ImGui.text("Rotation:");
+                if (ImGui.inputFloat3("##Rotation", tempRot)) {
+                    scene.updateSelectedObjectRotation(tempRot[0], tempRot[1], tempRot[2]);
+                }
+                
+                ImGui.text("Scale:");
+                if (ImGui.inputFloat3("##Scale", tempScale)) {
+                    scene.updateSelectedObjectScale(tempScale[0], tempScale[1], tempScale[2]);
+                }
+                
+                ImGui.separator();
+                ImGui.text("Transformations:");
+                
+                if (ImGui.button("Move (Ctrl+G)", 95, 30)) {
+                    scene.toggleTranslationMode();
+                }
+                ImGui.sameLine();
+                if (ImGui.button("Rotate (Ctrl+R)", 95, 30)) {
+                    scene.toggleRotationMode();
+                }
+                ImGui.sameLine();
+                if (ImGui.button("Scale (Ctrl+S)", 95, 30)) {
+                    scene.toggleScalingMode();
+                }
+            } else {
+                ImGui.text("No object selected");
+                ImGui.separator();
+                ImGui.text("Select an object from the tree");
+                ImGui.text("or create a new one with Shift+A");
+            }
+            
+            ImGui.end();
+        }
+        
         private void renderCreationMenu() {
             if (!inputHandler.isShowCreationMenu()) {
                 return;
             }
             
-            // Menu position - where button was pressed
             double posX = inputHandler.getMenuPosX();
             double posY = inputHandler.getMenuPosY();
             
@@ -1006,70 +1172,66 @@ public class Main {
             ImGui.setNextWindowPos(imGuiPosX, imGuiPosY, ImGuiCond.Appearing);
             ImGui.setNextWindowSize(200, 150, ImGuiCond.Appearing);
             
-            boolean[] keepMenuOpen = {true}; // Flag to close menu
+            boolean[] keepMenuOpen = {true};
             
             ImGui.begin("Create Object", 
                 ImGuiWindowFlags.NoResize | 
                 ImGuiWindowFlags.NoMove |
                 ImGuiWindowFlags.NoCollapse);
             
-            ImGui.text("Create new object:");
+            ImGui.text("Create:");
             ImGui.separator();
             
-            // Button to create cube at 3D cursor position
-            if (ImGui.button("Cube at Cursor", 180, 30)) {
+            if (ImGui.button("Cube", 180, 30)) {
                 scene.createObject(GameObject.Type.REGULAR, "Cube");
                 keepMenuOpen[0] = false;
-                System.out.println("Cube created at 3D cursor");
             }
             
-            // Button to create light source at 3D cursor position
-            if (ImGui.button("Light Source", 180, 30)) {
+            if (ImGui.button("Light", 180, 30)) {
                 scene.createObject(GameObject.Type.LIGHT, "Light");
                 keepMenuOpen[0] = false;
-                System.out.println("Light source created at 3D cursor");
             }
             
             ImGui.separator();
             
-            // Cancel button
             if (ImGui.button("Cancel", 180, 30)) {
                 keepMenuOpen[0] = false;
-                System.out.println("Creation menu cancelled");
             }
             
             ImGui.end();
             
-            // Close menu if needed
             if (!keepMenuOpen[0]) {
                 inputHandler.setShowCreationMenu(false);
             }
         }
 
-        // Clean ImGui resources
         public void cleanup() {
             imGuiGl3.dispose();
             imGuiGlfw.dispose();
             ImGui.destroyContext();
         }
+        
+        public void setScene(Scene scene) {
+            this.scene = scene;
+        }
     }
 
-    // ========== CAMERA CONTROLLER CLASS (CameraController) ==========
-    // Manages camera movement and rotation
-    private static class CameraController {
-        private Camera camera;               // Camera
-        private float speed = 3.0f;          // Movement speed
-        private float mouseSensitivity = 0.1f; // Mouse sensitivity
+    public static class CameraController {
+        private Camera camera;
+        private float speed = 3.0f;
+        private float mouseSensitivity = 0.1f;
         
-        private float yaw = -90.0f;   // Horizontal rotation angle
-        private float pitch = 0.0f;   // Vertical rotation angle
+        private float yaw = -90.0f;
+        private float pitch = 0.0f;
+        private float[] initialPosition = {0.0f, 2.0f, 5.0f};
+        private float initialYaw = -90.0f;
+        private float initialPitch = 0.0f;
 
         public CameraController() {
-            camera = new Camera();     // Create camera
-            updateCameraVectors();     // Initialize camera vectors
+            camera = new Camera();
+            updateCameraVectors();
         }
 
-        // Handle mouse movement (camera rotation)
         public void handleMouseMovement(double xoffset, double yoffset) {
             xoffset *= mouseSensitivity;
             yoffset *= mouseSensitivity;
@@ -1077,43 +1239,36 @@ public class Main {
             yaw += (float) xoffset;
             pitch += (float) yoffset;
 
-            // Limit vertical angle (to avoid camera flipping)
             if (pitch > 89.0f) pitch = 89.0f;
             if (pitch < -89.0f) pitch = -89.0f;
 
             updateCameraVectors();
         }
 
-        // Handle mouse wheel scroll (speed change)
         public void handleScroll(double yoffset) {
             speed += (float) yoffset * 0.5f;
             
-            // Limit speed
             if (speed < 0.1f) speed = 0.1f;
             if (speed > 10.0f) speed = 10.0f;
         }
 
-        // Update camera movement with WASD keys
         public void updateMovement(boolean[] keyStates, float deltaTime) {
             float velocity = speed * deltaTime;
             float[] cameraPos = camera.getPosition();
             float[] front = camera.getFrontVector();
 
-            // Forward movement (W)
             if (keyStates[GLFW_KEY_W]) {
                 cameraPos[0] += front[0] * velocity;
                 cameraPos[1] += front[1] * velocity;
                 cameraPos[2] += front[2] * velocity;
             }
             
-            // Backward movement (S)
             if (keyStates[GLFW_KEY_S]) {
                 cameraPos[0] -= front[0] * velocity;
                 cameraPos[1] -= front[1] * velocity;
                 cameraPos[2] -= front[2] * velocity;
             }
             
-            // Left movement (A)
             if (keyStates[GLFW_KEY_A]) {
                 float[] right = camera.getRightVector();
                 cameraPos[0] -= right[0] * velocity;
@@ -1121,7 +1276,6 @@ public class Main {
                 cameraPos[2] -= right[2] * velocity;
             }
             
-            // Right movement (D)
             if (keyStates[GLFW_KEY_D]) {
                 float[] right = camera.getRightVector();
                 cameraPos[0] += right[0] * velocity;
@@ -1129,13 +1283,22 @@ public class Main {
                 cameraPos[2] += right[2] * velocity;
             }
         }
+        
+        public void resetCamera() {
+            float[] pos = camera.getPosition();
+            pos[0] = initialPosition[0];
+            pos[1] = initialPosition[1];
+            pos[2] = initialPosition[2];
+            yaw = initialYaw;
+            pitch = initialPitch;
+            updateCameraVectors();
+            System.out.println("Camera reset to initial position");
+        }
 
-        // Update camera direction vectors based on yaw and pitch angles
         private void updateCameraVectors() {
             float yawRad = (float) Math.toRadians(yaw);
             float pitchRad = (float) Math.toRadians(pitch);
 
-            // Calculate camera direction vector
             float[] front = new float[3];
             front[0] = (float) (Math.cos(yawRad) * Math.cos(pitchRad));
             front[1] = (float) Math.sin(pitchRad);
@@ -1145,7 +1308,6 @@ public class Main {
             camera.updateVectors();
         }
 
-        // Normalize vector (bring to length 1)
         private float[] normalize(float[] v) {
             float length = (float) Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
             if (length > 0) {
@@ -1156,27 +1318,35 @@ public class Main {
             return v;
         }
 
-        // Getters
         public Camera getCamera() { return camera; }
         public float getSpeed() { return speed; }
+        public float getYaw() { return yaw; }
+        public float getPitch() { return pitch; }
+        public float[] getCameraPosition() { return camera.getPosition(); }
+        
+        public void setSpeed(float speed) { this.speed = speed; }
+        public void setYaw(float yaw) { this.yaw = yaw; }
+        public void setPitch(float pitch) { this.pitch = pitch; }
+        public void setCameraPosition(float x, float y, float z) {
+            float[] pos = camera.getPosition();
+            pos[0] = x;
+            pos[1] = y;
+            pos[2] = z;
+        }
     }
 
-    // ========== CAMERA CLASS (Camera) ==========
-    // Contains camera state and calculates view and projection matrices
-    private static class Camera {
-        private float[] position = {0.0f, 2.0f, 5.0f}; // Camera position
-        private float[] front = {0.0f, 0.0f, -1.0f};   // Look direction
-        private float[] up = {0.0f, 1.0f, 0.0f};       // Up vector
-        private float[] right = {1.0f, 0.0f, 0.0f};    // Right vector
-        private float[] worldUp = {0.0f, 1.0f, 0.0f};  // World up vector
+    public static class Camera {
+        private float[] position = {0.0f, 2.0f, 5.0f};
+        private float[] front = {0.0f, 0.0f, -1.0f};
+        private float[] up = {0.0f, 1.0f, 0.0f};
+        private float[] right = {1.0f, 0.0f, 0.0f};
+        private float[] worldUp = {0.0f, 1.0f, 0.0f};
 
-        // Update right and up vectors based on front
         public void updateVectors() {
             right = normalize(crossProduct(front, worldUp));
             up = normalize(crossProduct(right, front));
         }
 
-        // Create view matrix
         public float[] getViewMatrix() {
             float[] viewMatrix = new float[16];
             
@@ -1184,12 +1354,10 @@ public class Main {
             float[] cameraFront = front;
             float[] cameraUp = up;
 
-            // Calculate camera basis (LookAt matrix)
             float[] z = normalize(new float[]{-cameraFront[0], -cameraFront[1], -cameraFront[2]});
             float[] x = normalize(crossProduct(cameraUp, z));
             float[] y = crossProduct(z, x);
 
-            // Fill view matrix
             viewMatrix[0] = x[0]; viewMatrix[1] = y[0]; viewMatrix[2] = z[0]; viewMatrix[3] = 0.0f;
             viewMatrix[4] = x[1]; viewMatrix[5] = y[1]; viewMatrix[6] = z[1]; viewMatrix[7] = 0.0f;
             viewMatrix[8] = x[2]; viewMatrix[9] = y[2]; viewMatrix[10] = z[2]; viewMatrix[11] = 0.0f;
@@ -1201,18 +1369,15 @@ public class Main {
             return viewMatrix;
         }
 
-        // Create projection matrix (perspective projection)
         public float[] getProjectionMatrix(int width, int height) {
             float[] projectionMatrix = new float[16];
-            float aspect = (float) width / height;   // Aspect ratio
-            float fov = (float) Math.toRadians(45.0f); // 45 degree field of view
-            float near = 0.1f;  // Near clipping plane
-            float far = 100.0f; // Far clipping plane
+            float aspect = (float) width / height;
+            float fov = (float) Math.toRadians(45.0f);
+            float near = 0.1f;
+            float far = 100.0f;
 
-            // Calculate projection matrix components
             float f = (float) (1.0 / Math.tan(fov / 2.0));
 
-            // Fill projection matrix (perspective projection)
             projectionMatrix[0] = f / aspect;
             projectionMatrix[5] = f;
             projectionMatrix[10] = (far + near) / (near - far);
@@ -1223,25 +1388,19 @@ public class Main {
             return projectionMatrix;
         }
         
-        // Convert screen coordinates to world space ray
         public float[] screenToWorldRay(int screenX, int screenY, int screenWidth, int screenHeight) {
-            // Convert screen coordinates to normalized device coordinates
             float x = (2.0f * screenX) / screenWidth - 1.0f;
             float y = 1.0f - (2.0f * screenY) / screenHeight;
             
-            // Coordinates in homogeneous clip space
             float[] rayClip = {x, y, -1.0f, 1.0f};
             
-            // Convert to eye space
             float[] rayEye = multiplyMatrixVector(inverseProjectionMatrix(screenWidth, screenHeight), rayClip);
             rayEye[2] = -1.0f;
             rayEye[3] = 0.0f;
             
-            // Convert to world space
             float[] rayWorld = multiplyMatrixVector(inverseViewMatrix(), rayEye);
             float[] rayDir = {rayWorld[0], rayWorld[1], rayWorld[2]};
             
-            // Normalize ray direction
             float length = (float)Math.sqrt(rayDir[0]*rayDir[0] + rayDir[1]*rayDir[1] + rayDir[2]*rayDir[2]);
             if (length > 0) {
                 rayDir[0] /= length;
@@ -1252,12 +1411,10 @@ public class Main {
             return rayDir;
         }
         
-        // Inverse projection matrix (for coordinate transformation)
         private float[] inverseProjectionMatrix(int width, int height) {
             float[] proj = getProjectionMatrix(width, height);
             float[] inv = new float[16];
             
-            // Simplified inversion for perspective projection
             inv[0] = 1.0f / proj[0];
             inv[5] = 1.0f / proj[5];
             inv[10] = 0.0f;
@@ -1268,28 +1425,23 @@ public class Main {
             return inv;
         }
         
-        // Inverse view matrix
         private float[] inverseViewMatrix() {
             float[] view = getViewMatrix();
             float[] inv = new float[16];
             
-            // Invert rotation (transposition)
             inv[0] = view[0]; inv[1] = view[4]; inv[2] = view[8];
             inv[4] = view[1]; inv[5] = view[5]; inv[6] = view[9];
             inv[8] = view[2]; inv[9] = view[6]; inv[10] = view[10];
             
-            // Invert translation
             inv[12] = -(view[12] * view[0] + view[13] * view[1] + view[14] * view[2]);
             inv[13] = -(view[12] * view[4] + view[13] * view[5] + view[14] * view[6]);
             inv[14] = -(view[12] * view[8] + view[13] * view[9] + view[14] * view[10]);
             
-            // Fill remaining elements
             inv[3] = 0.0f; inv[7] = 0.0f; inv[11] = 0.0f; inv[15] = 1.0f;
             
             return inv;
         }
         
-        // Multiply matrix by vector
         private float[] multiplyMatrixVector(float[] m, float[] v) {
             float[] result = new float[4];
             result[0] = m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12] * v[3];
@@ -1299,7 +1451,6 @@ public class Main {
             return result;
         }
 
-        // Cross product of two vectors
         private float[] crossProduct(float[] a, float[] b) {
             return new float[]{
                 a[1] * b[2] - a[2] * b[1],
@@ -1308,12 +1459,10 @@ public class Main {
             };
         }
 
-        // Dot product of two vectors
         private float dotProduct(float[] a, float[] b) {
             return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         }
 
-        // Normalize vector
         private float[] normalize(float[] v) {
             float length = (float) Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
             if (length > 0) {
@@ -1324,27 +1473,24 @@ public class Main {
             return v;
         }
 
-        // Getters and setters
         public float[] getPosition() { return position; }
         public float[] getFrontVector() { return front; }
         public float[] getUpVector() { return up; }
         public float[] getRightVector() { return right; }
         public void setFrontVector(float[] front) { this.front = front; }
+        public void setPosition(float[] position) { this.position = position; }
     }
 
-    // ========== GAME OBJECT CLASS (GameObject) ==========
-    // Represents any object in 3D scene
-    private static class GameObject {
-        // Object types (regular objects and light sources)
+    public static class GameObject {
         public enum Type { REGULAR, LIGHT }
 
-        private float[] position = new float[3];  // Position in world
-        private float[] scale = new float[3];     // Scale on axes
-        private float[] rotation = new float[3];  // Rotation angles on axes
-        private Material material;                // Object material
-        private int id;                           // Unique ID
-        private Type type;                        // Object type
-        private String name;                      // Object name
+        private float[] position = new float[3];
+        private float[] scale = new float[3];
+        private float[] rotation = new float[3];
+        private Material material;
+        private int id;
+        private Type type;
+        private String name;
 
         public GameObject(float x, float y, float z, float sx, float sy, float sz, 
                          Material mat, int id, Type type, String name) {
@@ -1363,26 +1509,21 @@ public class Main {
             this.name = name;
         }
 
-        // Create model matrix (transformation from local to world coordinates)
         public float[] getModelMatrix() {
             float[] matrix = new float[16];
             
-            // Initialize as identity matrix
             for (int i = 0; i < 16; i++) matrix[i] = 0.0f;
             matrix[0] = 1.0f; matrix[5] = 1.0f; matrix[10] = 1.0f; matrix[15] = 1.0f;
 
-            // Apply scale
             matrix[0] *= scale[0];
             matrix[5] *= scale[1];
             matrix[10] *= scale[2];
 
-            // Apply rotation if any
             if (rotation[0] != 0.0f || rotation[1] != 0.0f || rotation[2] != 0.0f) {
                 float[] rotationMatrix = createRotationMatrix();
                 matrix = multiplyMatrices(matrix, rotationMatrix);
             }
 
-            // Apply translation
             matrix[12] = position[0];
             matrix[13] = position[1];
             matrix[14] = position[2];
@@ -1390,42 +1531,16 @@ public class Main {
             return matrix;
         }
 
-        // Create rotation matrix from Euler angles
         private float[] createRotationMatrix() {
             float[] matrix = new float[16];
             
-            // Initialize as identity matrix
             for (int i = 0; i < 16; i++) matrix[i] = 0.0f;
             matrix[0] = 1.0f; matrix[5] = 1.0f; matrix[10] = 1.0f; matrix[15] = 1.0f;
 
-            // Convert angles from degrees to radians
             float rx = (float) Math.toRadians(rotation[0]);
             float ry = (float) Math.toRadians(rotation[1]);
             float rz = (float) Math.toRadians(rotation[2]);
 
-            // Apply rotation around Z
-            if (rz != 0.0f) {
-                float[] rotZ = new float[16];
-                for (int i = 0; i < 16; i++) rotZ[i] = 0.0f;
-                rotZ[0] = (float) Math.cos(rz); rotZ[1] = (float) Math.sin(rz);
-                rotZ[4] = (float) -Math.sin(rz); rotZ[5] = (float) Math.cos(rz);
-                rotZ[10] = 1.0f;
-                rotZ[15] = 1.0f;
-                matrix = multiplyMatrices(matrix, rotZ);
-            }
-
-            // Apply rotation around Y
-            if (ry != 0.0f) {
-                float[] rotY = new float[16];
-                for (int i = 0; i < 16; i++) rotY[i] = 0.0f;
-                rotY[0] = (float) Math.cos(ry); rotY[2] = (float) -Math.sin(ry);
-                rotY[5] = 1.0f;
-                rotY[8] = (float) Math.sin(ry); rotY[10] = (float) Math.cos(ry);
-                rotY[15] = 1.0f;
-                matrix = multiplyMatrices(matrix, rotY);
-            }
-
-            // Apply rotation around X
             if (rx != 0.0f) {
                 float[] rotX = new float[16];
                 for (int i = 0; i < 16; i++) rotX[i] = 0.0f;
@@ -1436,10 +1551,29 @@ public class Main {
                 matrix = multiplyMatrices(matrix, rotX);
             }
 
+            if (ry != 0.0f) {
+                float[] rotY = new float[16];
+                for (int i = 0; i < 16; i++) rotY[i] = 0.0f;
+                rotY[0] = (float) Math.cos(ry); rotY[2] = (float) -Math.sin(ry);
+                rotY[5] = 1.0f;
+                rotY[8] = (float) Math.sin(ry); rotY[10] = (float) Math.cos(ry);
+                rotY[15] = 1.0f;
+                matrix = multiplyMatrices(matrix, rotY);
+            }
+
+            if (rz != 0.0f) {
+                float[] rotZ = new float[16];
+                for (int i = 0; i < 16; i++) rotZ[i] = 0.0f;
+                rotZ[0] = (float) Math.cos(rz); rotZ[1] = (float) Math.sin(rz);
+                rotZ[4] = (float) -Math.sin(rz); rotZ[5] = (float) Math.cos(rz);
+                rotZ[10] = 1.0f;
+                rotZ[15] = 1.0f;
+                matrix = multiplyMatrices(matrix, rotZ);
+            }
+
             return matrix;
         }
 
-        // Multiply two 4x4 matrices
         private float[] multiplyMatrices(float[] a, float[] b) {
             float[] result = new float[16];
             for (int i = 0; i < 4; i++) {
@@ -1453,10 +1587,15 @@ public class Main {
             return result;
         }
 
-        // Object transformation methods
+        public void translate(float dx, float dy, float dz) {
+            position[0] += dx;
+            position[1] += dy;
+            position[2] += dz;
+        }
+
         public void rotateX(float angle) {
             rotation[0] += angle;
-            rotation[0] = rotation[0] % 360.0f; // Limit to 360 degrees
+            rotation[0] = rotation[0] % 360.0f;
         }
 
         public void rotateY(float angle) {
@@ -1474,27 +1613,47 @@ public class Main {
             scale[1] *= factor;
             scale[2] *= factor;
             
-            // Minimum scale so object doesn't disappear
             if (scale[0] < 0.1f) scale[0] = 0.1f;
             if (scale[1] < 0.1f) scale[1] = 0.1f;
             if (scale[2] < 0.1f) scale[2] = 0.1f;
         }
 
-        // Getters
-        public float[] getPosition() { return position; }
+        public float[] getPosition() { return position.clone(); }
+        public float[] getScale() { return scale.clone(); }
+        public float[] getRotation() { return rotation.clone(); }
         public Material getMaterial() { return material; }
         public Type getType() { return type; }
         public String getName() { return name; }
         public int getId() { return id; }
+        
+        public void setPosition(float x, float y, float z) {
+            position[0] = x;
+            position[1] = Math.max(0.1f, y);
+            position[2] = z;
+        }
+        
+        public void setRotation(float x, float y, float z) {
+            rotation[0] = x % 360.0f;
+            rotation[1] = y % 360.0f;
+            rotation[2] = z % 360.0f;
+        }
+        
+        public void setScale(float x, float y, float z) {
+            scale[0] = Math.max(0.1f, x);
+            scale[1] = Math.max(0.1f, y);
+            scale[2] = Math.max(0.1f, z);
+        }
+        
+        public void cleanup() {
+            // Cleanup resources if needed
+        }
     }
 
-    // ========== MATERIAL CLASS (Material) ==========
-    // Contains material properties for lighting (Phong model)
-    private static class Material {
-        private float[] ambient;    // Ambient reflection
-        private float[] diffuse;    // Diffuse reflection
-        private float[] specular;   // Specular reflection
-        private float shininess;    // Shininess (exponent in formula)
+    public static class Material {
+        private float[] ambient;
+        private float[] diffuse;
+        private float[] specular;
+        private float shininess;
 
         public Material(float[] ambient, float[] diffuse, float[] specular, float shininess) {
             this.ambient = ambient;
@@ -1503,44 +1662,35 @@ public class Main {
             this.shininess = shininess;
         }
 
-        // Getters
         public float[] getAmbient() { return ambient; }
         public float[] getDiffuse() { return diffuse; }
         public float[] getSpecular() { return specular; }
         public float getShininess() { return shininess; }
     }
 
-    // ========== OBJECT PICKER CLASS (ObjectPicker) ==========
-    // Implements object selection by pixels (picking) and raycasting
     private static class ObjectPicker {
-        private ByteBuffer pixelBuffer = BufferUtils.createByteBuffer(4); // Buffer for reading pixels
+        private ByteBuffer pixelBuffer = BufferUtils.createByteBuffer(4);
 
-        // Select object by mouse coordinates (color encoding)
         public GameObject performPicking(Scene scene, ShaderManager shaderManager, GeometryManager geometryManager, 
                                        Window window, int mouseX, int mouseY) {
-            // Set black background for picking
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            shaderManager.usePickingShader(); // Use picking shader
+            shaderManager.usePickingShader();
 
-            // Set camera matrices
             Camera camera = scene.getCameraController().getCamera();
             shaderManager.setViewMatrix(camera.getViewMatrix());
             shaderManager.setProjectionMatrix(camera.getProjectionMatrix(window.getWidth(), window.getHeight()));
 
-            // Render all objects with unique colors (ID in RGB)
             for (GameObject obj : scene.getGameObjects()) {
                 int objectID = obj.getId();
                 
-                // Encode ID into RGB color
                 float r = ((objectID >> 16) & 0xFF) / 255.0f;
                 float g = ((objectID >> 8) & 0xFF) / 255.0f;
                 float b = (objectID & 0xFF) / 255.0f;
 
                 shaderManager.setObjectColor(r, g, b);
 
-                // Render object depending on type
                 if (obj.getType() == GameObject.Type.REGULAR) {
                     geometryManager.renderCube(obj.getModelMatrix());
                 } else {
@@ -1548,57 +1698,44 @@ public class Main {
                 }
             }
 
-            // Read pixel color under mouse cursor
             glReadPixels(mouseX, window.getHeight() - mouseY, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixelBuffer);
 
-            // Return to main shader
             shaderManager.useMainShader();
             glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
-            // Decode ID from pixel color
             int pickedID = -1;
             if (pixelBuffer != null) {
+                pixelBuffer.rewind();
                 int r = pixelBuffer.get(0) & 0xFF;
                 int g = pixelBuffer.get(1) & 0xFF;
                 int b = pixelBuffer.get(2) & 0xFF;
                 pickedID = (r << 16) | (g << 8) | b;
             }
 
-            // Find object with corresponding ID
             for (GameObject obj : scene.getGameObjects()) {
                 if (obj.getId() == pickedID) {
                     return obj;
                 }
             }
 
-            return null; // Nothing selected
+            return null;
         }
         
-        // Raycasting implementation for 3D cursor positioning
         public float[] performRaycast(Scene scene, Window window, int mouseX, int mouseY) {
             Camera camera = scene.getCameraController().getCamera();
             
-            // Get ray direction from screen coordinates
             float[] rayDir = camera.screenToWorldRay(mouseX, mouseY, window.getWidth(), window.getHeight());
             float[] rayOrigin = camera.getPosition();
-            
-            // Find intersection with ground plane (y = 0)
-            // Ray equation: P = O + tD
-            // Plane equation: y = 0
-            // Solve: O.y + t * D.y = 0
-            // t = -O.y / D.y
             
             float t = -rayOrigin[1] / rayDir[1];
             
             if (t > 0) {
-                // Found intersection with ground
                 float[] intersection = new float[3];
                 intersection[0] = rayOrigin[0] + rayDir[0] * t;
-                intersection[1] = 0.0f; // Ground plane
+                intersection[1] = 0.0f;
                 intersection[2] = rayOrigin[2] + rayDir[2] * t;
                 return intersection;
             } else {
-                // Ray directed upward, use fixed distance
                 float defaultDistance = 10.0f;
                 float[] intersection = new float[3];
                 intersection[0] = rayOrigin[0] + rayDir[0] * defaultDistance;
@@ -1609,16 +1746,14 @@ public class Main {
         }
 
         public void cleanup() {
-            // Clean resources if needed
+            // Cleanup
         }
     }
 
-    // ========== SHADER MANAGER CLASS (ShaderManager) ==========
-    // Manages shader compilation and usage
     private static class ShaderManager {
-        private int mainShaderProgram;      // Main shader (lighting)
-        private int pickingShaderProgram;   // Object picking shader
-        private int cursorShaderProgram;    // 3D cursor shader
+        private int mainShaderProgram;
+        private int pickingShaderProgram;
+        private int cursorShaderProgram;
 
         public ShaderManager() {
             mainShaderProgram = compileMainShader();
@@ -1626,22 +1761,18 @@ public class Main {
             cursorShaderProgram = compileCursorShader();
         }
 
-        // Use main shader
         public void useMainShader() {
             glUseProgram(mainShaderProgram);
         }
 
-        // Use object picking shader
         public void usePickingShader() {
             glUseProgram(pickingShaderProgram);
         }
         
-        // Use 3D cursor shader
         public void useCursorShader() {
             glUseProgram(cursorShaderProgram);
         }
 
-        // Set view matrix in current shader
         public void setViewMatrix(float[] viewMatrix) {
             int program = getCurrentProgram();
             int location = glGetUniformLocation(program, "view");
@@ -1650,7 +1781,6 @@ public class Main {
             }
         }
 
-        // Set projection matrix in current shader
         public void setProjectionMatrix(float[] projectionMatrix) {
             int program = getCurrentProgram();
             int location = glGetUniformLocation(program, "projection");
@@ -1659,7 +1789,6 @@ public class Main {
             }
         }
 
-        // Set camera position (for lighting)
         public void setViewPos(float[] viewPos) {
             int location = glGetUniformLocation(mainShaderProgram, "viewPos");
             if (location != -1) {
@@ -1667,7 +1796,6 @@ public class Main {
             }
         }
 
-        // Set light source position
         public void setLightPosition(float[] lightPos) {
             int location = glGetUniformLocation(mainShaderProgram, "light.position");
             if (location != -1) {
@@ -1675,7 +1803,6 @@ public class Main {
             }
         }
 
-        // Set light source properties
         public void setLightProperties(float[] ambient, float[] diffuse, float[] specular) {
             int ambientLoc = glGetUniformLocation(mainShaderProgram, "light.ambient");
             int diffuseLoc = glGetUniformLocation(mainShaderProgram, "light.diffuse");
@@ -1686,7 +1813,6 @@ public class Main {
             if (specularLoc != -1) glUniform3f(specularLoc, specular[0], specular[1], specular[2]);
         }
 
-        // Set material properties
         public void setMaterial(Material material) {
             if (material != null) {
                 int ambientLoc = glGetUniformLocation(mainShaderProgram, "material.ambient");
@@ -1701,7 +1827,6 @@ public class Main {
             }
         }
 
-        // Set object color
         public void setObjectColor(float r, float g, float b) {
             int program = getCurrentProgram();
             int location = glGetUniformLocation(program, "objectColor");
@@ -1710,7 +1835,6 @@ public class Main {
             }
         }
 
-        // Enable/disable lighting
         public void setUseLighting(boolean useLighting) {
             int location = glGetUniformLocation(mainShaderProgram, "useLighting");
             if (location != -1) {
@@ -1718,20 +1842,25 @@ public class Main {
             }
         }
 
-        // Get current shader program
         private int getCurrentProgram() {
             return glGetInteger(GL_CURRENT_PROGRAM);
         }
 
-        // Compile main shader
         private int compileMainShader() {
-            String vertexSource = loadShaderSource("vertex.glsl", VERTEX_SHADER_SOURCE);
-            String fragmentSource = loadShaderSource("fragment.glsl", FRAGMENT_SHADER_SOURCE);
-            System.out.println("Compiling main shader...");
+            String vertexSource = loadShaderSource("vertex.glsl");
+            String fragmentSource = loadShaderSource("fragment.glsl");
+            
+            if (vertexSource == null || fragmentSource == null) {
+                System.out.println("Shader files not found, using built-in shaders");
+                vertexSource = VERTEX_SHADER_SOURCE;
+                fragmentSource = FRAGMENT_SHADER_SOURCE;
+            } else {
+                System.out.println("Shader files loaded successfully");
+            }
+            
             return createShaderProgram(vertexSource, fragmentSource);
         }
 
-        // Compile object picking shader
         private int compilePickingShader() {
             String vertexShader = "#version 330 core\n" +
                 "layout (location = 0) in vec3 aPos;\n" +
@@ -1749,11 +1878,9 @@ public class Main {
                 "    FragColor = vec4(objectColor, 1.0);\n" +
                 "}";
 
-            System.out.println("Compiling object picking shader...");
             return createShaderProgram(vertexShader, fragmentShader);
         }
         
-        // Compile 3D cursor shader
         private int compileCursorShader() {
             String vertexShader = "#version 330 core\n" +
                 "layout (location = 0) in vec3 aPos;\n" +
@@ -1771,39 +1898,32 @@ public class Main {
                 "    FragColor = vec4(objectColor, 1.0);\n" +
                 "}";
 
-            System.out.println("Compiling 3D cursor shader...");
             return createShaderProgram(vertexShader, fragmentShader);
         }
 
-        // Create shader program from source code
         private int createShaderProgram(String vertexSource, String fragmentSource) {
-            // Compile vertex shader
             int vertexShader = glCreateShader(GL_VERTEX_SHADER);
             glShaderSource(vertexShader, vertexSource);
             glCompileShader(vertexShader);
             checkShaderCompilation(vertexShader, "VERTEX");
             
-            // Compile fragment shader
             int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
             glShaderSource(fragmentShader, fragmentSource);
             glCompileShader(fragmentShader);
             checkShaderCompilation(fragmentShader, "FRAGMENT");
             
-            // Create and link program
             int program = glCreateProgram();
             glAttachShader(program, vertexShader);
             glAttachShader(program, fragmentShader);
             glLinkProgram(program);
             checkProgramLinking(program);
             
-            // Clean up compiled shaders
             glDeleteShader(vertexShader);
             glDeleteShader(fragmentShader);
             
             return program;
         }
 
-        // Check shader compilation
         private void checkShaderCompilation(int shader, String type) {
             int success = glGetShaderi(shader, GL_COMPILE_STATUS);
             if (success == GL_FALSE) {
@@ -1813,7 +1933,6 @@ public class Main {
             }
         }
 
-        // Check shader program linking
         private void checkProgramLinking(int program) {
             int success = glGetProgrami(program, GL_LINK_STATUS);
             if (success == GL_FALSE) {
@@ -1823,40 +1942,34 @@ public class Main {
             }
         }
 
-        // Load shader source code from file
-        private String loadShaderSource(String filename, String fallback) {
+        private String loadShaderSource(String filename) {
             try {
-                // Try to load from resources
-                InputStream inputStream = getClass().getClassLoader().getResourceAsStream(filename);
-                if (inputStream != null) {
-                    System.out.println("Loading shader from resources: " + filename);
-                    return new String(inputStream.readAllBytes());
-                }
-                
-                // Try to load from file system
-                java.nio.file.Path filePath = java.nio.file.Paths.get(filename);
+                // Пробуем загрузить из src/main/resources/shaders/
+                java.nio.file.Path filePath = java.nio.file.Paths.get("src/main/resources/shaders/" + filename);
                 if (java.nio.file.Files.exists(filePath)) {
-                    System.out.println("Loading shader from file: " + filename);
                     return new String(java.nio.file.Files.readAllBytes(filePath));
                 }
                 
-                // Use fallback
-                System.out.println("Using fallback shader for: " + filename);
-                return fallback;
+                // Пробуем загрузить из classpath
+                InputStream inputStream = getClass().getClassLoader().getResourceAsStream("shaders/" + filename);
+                if (inputStream != null) {
+                    return new String(inputStream.readAllBytes());
+                }
+                
+                System.err.println("Shader file not found: " + filename);
+                return null;
             } catch (IOException e) {
-                System.out.println("Error loading shader, using fallback: " + e.getMessage());
-                return fallback;
+                System.err.println("Failed to load shader: " + filename);
+                return null;
             }
         }
 
-        // Clean shader programs
         public void cleanup() {
             if (mainShaderProgram != 0) glDeleteProgram(mainShaderProgram);
             if (pickingShaderProgram != 0) glDeleteProgram(pickingShaderProgram);
             if (cursorShaderProgram != 0) glDeleteProgram(cursorShaderProgram);
         }
 
-        // Fallback vertex shader (if file not found)
         private static final String VERTEX_SHADER_SOURCE = "#version 330 core\n" +
             "layout (location = 0) in vec3 aPos;\n" +
             "layout (location = 1) in vec3 aNormal;\n" +
@@ -1871,7 +1984,6 @@ public class Main {
             "    gl_Position = projection * view * vec4(FragPos, 1.0);\n" +
             "}";
 
-        // Fallback fragment shader (if file not found)
         private static final String FRAGMENT_SHADER_SOURCE = "#version 330 core\n" +
             "out vec4 FragColor;\n" +
             "in vec3 FragPos;\n" +
@@ -1907,69 +2019,57 @@ public class Main {
             "    vec3 reflectDir = reflect(-lightDir, norm);\n" +
             "    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);\n" +
             "    vec3 specular = light.specular * (spec * material.specular);\n" +
-            "    vec3 result = ambient + diffuse + specular;\n" +
-            "    FragColor = vec4(result * objectColor, 1.0);\n" +
+            "    vec3 result = (ambient + diffuse + specular) * objectColor;\n" +
+            "    FragColor = vec4(result, 1.0);\n" +
             "}";
     }
 
-    // ========== GEOMETRY MANAGER CLASS (GeometryManager) ==========
-    // Manages object geometry (VBO, VAO, EBO)
     private static class GeometryManager {
-        private int cubeVAO, cubeVBO;        // Cube (regular objects)
-        private int gridVAO, gridVBO;        // Grid
-        private int lightVAO, lightVBO, lightEBO; // Sphere (light sources)
-        private int cursorVAO, cursorVBO;    // 3D cursor
-        private float[] sphereVertices;      // Sphere vertices
-        private int[] sphereIndices;         // Sphere indices
+        private int cubeVAO, cubeVBO;
+        private int gridVAO, gridVBO;
+        private int lightVAO, lightVBO, lightEBO;
+        private int cursorVAO, cursorVBO;
+        private float[] sphereVertices;
+        private int[] sphereIndices;
 
         public GeometryManager() {
-            setupGeometry(); // Initialize all geometry
+            setupGeometry();
         }
 
-        // Initialize all geometry
         private void setupGeometry() {
-            setupCube();      // Cube geometry
-            setupGrid();      // Grid geometry
-            setupLightSphere(); // Sphere geometry (light source)
-            setup3DCursor();  // 3D cursor geometry
+            setupCube();
+            setupGrid();
+            setupLightSphere();
+            setup3DCursor();
         }
 
-        // Set up cube geometry
         private void setupCube() {
-            // Cube vertices with normals (36 vertices, 6 faces with 2 triangles each)
             float[] cubeVertices = {
-                // Back face
                 -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f, 0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,
                 0.5f,  0.5f, -0.5f,  0.0f, 0.0f, -1.0f, 0.5f,  0.5f, -0.5f,  0.0f, 0.0f, -1.0f,
                 -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, -1.0f, -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, -1.0f,
                 
-                // Front face
                 -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
                 0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f, 0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
                 -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f, -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
                 
-                // Left face
                 -0.5f,  0.5f,  0.5f, -1.0f, 0.0f, 0.0f, -0.5f,  0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
                 -0.5f, -0.5f, -0.5f, -1.0f, 0.0f, 0.0f, -0.5f, -0.5f, -0.5f, -1.0f, 0.0f, 0.0f,
                 -0.5f, -0.5f,  0.5f, -1.0f, 0.0f, 0.0f, -0.5f,  0.5f,  0.5f, -1.0f, 0.0f, 0.0f,
                 
-                // Right face
                 0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f, 0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
                 0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f, 0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
                 0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f, 0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
                 
-                // Bottom face
                 -0.5f, -0.5f, -0.5f,  0.0f, -1.0f, 0.0f, 0.5f, -0.5f, -0.5f,  0.0f, -1.0f, 0.0f,
                 0.5f, -0.5f,  0.5f,  0.0f, -1.0f, 0.0f, 0.5f, -0.5f,  0.5f,  0.0f, -1.0f, 0.0f,
                 -0.5f, -0.5f,  0.5f,  0.0f, -1.0f, 0.0f, -0.5f, -0.5f, -0.5f,  0.0f, -1.0f, 0.0f,
                 
-                // Top face
                 -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f, 0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
                 0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f, 0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f,
                 -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 0.0f, -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f
             };
 
-            // Create VAO and VBO for cube
             cubeVAO = glGenVertexArrays();
             cubeVBO = glGenBuffers();
 
@@ -1977,40 +2077,34 @@ public class Main {
             glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
             glBufferData(GL_ARRAY_BUFFER, cubeVertices, GL_STATIC_DRAW);
 
-            // Set vertex attributes (position and normal)
             glVertexAttribPointer(0, 3, GL_FLOAT, false, 6 * Float.BYTES, 0);
             glEnableVertexAttribArray(0);
             glVertexAttribPointer(1, 3, GL_FLOAT, false, 6 * Float.BYTES, 3 * Float.BYTES);
             glEnableVertexAttribArray(1);
         }
 
-        // Set up grid geometry
         private void setupGrid() {
-            float gridSize = 10.0f;   // Grid size
-            int gridLines = 20;       // Number of lines
+            float gridSize = 10.0f;
+            int gridLines = 20;
             List<Float> gridVertices = new ArrayList<>();
 
-            // Vertical lines (Z axis)
             for (int i = 0; i <= gridLines; i++) {
                 float z = -gridSize + (2 * gridSize * i / gridLines);
                 gridVertices.add(-gridSize); gridVertices.add(0.0f); gridVertices.add(z);
                 gridVertices.add(gridSize); gridVertices.add(0.0f); gridVertices.add(z);
             }
 
-            // Horizontal lines (X axis)
             for (int i = 0; i <= gridLines; i++) {
                 float x = -gridSize + (2 * gridSize * i / gridLines);
                 gridVertices.add(x); gridVertices.add(0.0f); gridVertices.add(-gridSize);
                 gridVertices.add(x); gridVertices.add(0.0f); gridVertices.add(gridSize);
             }
 
-            // Convert list to array
             float[] gridArray = new float[gridVertices.size()];
             for (int i = 0; i < gridVertices.size(); i++) {
                 gridArray[i] = gridVertices.get(i);
             }
 
-            // Create VAO and VBO for grid
             gridVAO = glGenVertexArrays();
             gridVBO = glGenBuffers();
 
@@ -2021,11 +2115,9 @@ public class Main {
             glEnableVertexAttribArray(0);
         }
 
-        // Set up sphere geometry (for light sources)
         private void setupLightSphere() {
-            createSphereGeometry(0.2f, 16, 16); // Create sphere with radius 0.2
+            createSphereGeometry(0.5f, 16, 16);
 
-            // Create VAO, VBO and EBO for sphere
             lightVAO = glGenVertexArrays();
             lightVBO = glGenBuffers();
             lightEBO = glGenBuffers();
@@ -2039,24 +2131,18 @@ public class Main {
             glEnableVertexAttribArray(0);
         }
         
-        // Set up 3D cursor geometry (like Blender)
         private void setup3DCursor() {
-            // Create cross-shaped cursor with three axes
-            float size = 0.5f; // Cursor size
+            float size = 0.5f;
             float[] cursorVertices = {
-                // X axis (red) - line along X
                 -size, 0.0f, 0.0f,
                 size, 0.0f, 0.0f,
                 
-                // Y axis (green) - line along Y
                 0.0f, -size, 0.0f,
                 0.0f, size, 0.0f,
                 
-                // Z axis (blue) - line along Z
                 0.0f, 0.0f, -size,
                 0.0f, 0.0f, size,
                 
-                // Circle in XY plane (white)
                 0.0f, size, 0.0f,
                 size * 0.7f, size * 0.7f, 0.0f,
                 size * 0.7f, size * 0.7f, 0.0f,
@@ -2075,7 +2161,6 @@ public class Main {
                 0.0f, size, 0.0f,
             };
 
-            // Create VAO and VBO for cursor
             cursorVAO = glGenVertexArrays();
             cursorVBO = glGenBuffers();
 
@@ -2086,7 +2171,6 @@ public class Main {
             glEnableVertexAttribArray(0);
         }
 
-        // Create sphere geometry (parametric)
         private void createSphereGeometry(float radius, int sectors, int stacks) {
             List<Float> vertices = new ArrayList<>();
             List<Integer> indices = new ArrayList<>();
@@ -2094,7 +2178,6 @@ public class Main {
             float sectorStep = (float) (2 * Math.PI / sectors);
             float stackStep = (float) (Math.PI / stacks);
 
-            // Generate sphere vertices
             for (int i = 0; i <= stacks; ++i) {
                 float stackAngle = (float) (Math.PI / 2 - i * stackStep);
                 float xy = radius * (float) Math.cos(stackAngle);
@@ -2108,7 +2191,6 @@ public class Main {
                 }
             }
 
-            // Generate indices for triangles
             for (int i = 0; i < stacks; ++i) {
                 int k1 = i * (sectors + 1);
                 int k2 = k1 + sectors + 1;
@@ -2123,7 +2205,6 @@ public class Main {
                 }
             }
 
-            // Convert to arrays
             sphereVertices = new float[vertices.size()];
             for (int i = 0; i < vertices.size(); i++) sphereVertices[i] = vertices.get(i);
 
@@ -2131,7 +2212,6 @@ public class Main {
             for (int i = 0; i < indices.size(); i++) sphereIndices[i] = indices.get(i);
         }
 
-        // Render cube with given model matrix
         public void renderCube(float[] modelMatrix) {
             int modelLoc = glGetUniformLocation(glGetInteger(GL_CURRENT_PROGRAM), "model");
             glUniformMatrix4fv(modelLoc, false, modelMatrix);
@@ -2139,7 +2219,6 @@ public class Main {
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
 
-        // Render sphere (light source)
         public void renderLight(float[] modelMatrix) {
             int modelLoc = glGetUniformLocation(glGetInteger(GL_CURRENT_PROGRAM), "model");
             glUniformMatrix4fv(modelLoc, false, modelMatrix);
@@ -2147,7 +2226,6 @@ public class Main {
             glDrawElements(GL_TRIANGLES, sphereIndices.length, GL_UNSIGNED_INT, 0);
         }
 
-        // Render grid
         public void renderGrid() {
             float[] modelMatrix = new float[16];
             modelMatrix[0] = 1.0f; modelMatrix[5] = 1.0f; modelMatrix[10] = 1.0f; modelMatrix[15] = 1.0f;
@@ -2155,78 +2233,63 @@ public class Main {
             int modelLoc = glGetUniformLocation(glGetInteger(GL_CURRENT_PROGRAM), "model");
             glUniformMatrix4fv(modelLoc, false, modelMatrix);
             glBindVertexArray(gridVAO);
-            glDrawArrays(GL_LINES, 0, 84); // 84 vertices in grid (21 lines * 2 ends * 2 directions)
+            glDrawArrays(GL_LINES, 0, 84);
         }
         
-        // Render 3D cursor
         public void render3DCursor(float[] position, float size, ShaderManager shaderManager, 
                                   Camera camera, Window window) {
-            shaderManager.useCursorShader(); // Use cursor shader
+            shaderManager.useCursorShader();
             
-            // Set camera matrices for cursor
             shaderManager.setViewMatrix(camera.getViewMatrix());
             shaderManager.setProjectionMatrix(camera.getProjectionMatrix(window.getWidth(), window.getHeight()));
             
-            // Create model matrix for cursor
             float[] modelMatrix = new float[16];
             modelMatrix[0] = size; modelMatrix[5] = size; modelMatrix[10] = size; modelMatrix[15] = 1.0f;
             modelMatrix[12] = position[0];
             modelMatrix[13] = position[1];
             modelMatrix[14] = position[2];
             
-            // Set model matrix
             int modelLoc = glGetUniformLocation(glGetInteger(GL_CURRENT_PROGRAM), "model");
             glUniformMatrix4fv(modelLoc, false, modelMatrix);
             
-            // Disable depth test so cursor is always on top
             glDisable(GL_DEPTH_TEST);
-            
-            // Set line width
             glLineWidth(2.0f);
             glBindVertexArray(cursorVAO);
             
-            // Render axes with different colors
-            shaderManager.setObjectColor(1.0f, 0.0f, 0.0f); // Red - X axis
+            shaderManager.setObjectColor(1.0f, 0.0f, 0.0f);
             glDrawArrays(GL_LINES, 0, 2);
             
-            shaderManager.setObjectColor(0.0f, 1.0f, 0.0f); // Green - Y axis
+            shaderManager.setObjectColor(0.0f, 1.0f, 0.0f);
             glDrawArrays(GL_LINES, 2, 2);
             
-            shaderManager.setObjectColor(0.0f, 0.0f, 1.0f); // Blue - Z axis
+            shaderManager.setObjectColor(0.0f, 0.0f, 1.0f);
             glDrawArrays(GL_LINES, 4, 2);
             
-            shaderManager.setObjectColor(1.0f, 1.0f, 1.0f); // White - circle
+            shaderManager.setObjectColor(1.0f, 1.0f, 1.0f);
             glDrawArrays(GL_LINES, 6, 16);
             
-            // Restore settings
             glLineWidth(1.0f);
             glEnable(GL_DEPTH_TEST);
-            shaderManager.useMainShader(); // Return to main shader
+            shaderManager.useMainShader();
         }
 
-        // Render outline of selected object
         public void renderOutline(GameObject obj, ShaderManager shaderManager) {
-            // Disable depth test and enable line mode
             glDisable(GL_DEPTH_TEST);
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             glLineWidth(2.0f);
 
-            // Disable lighting for outline
             shaderManager.setUseLighting(false);
-            shaderManager.setObjectColor(1.0f, 0.0f, 0.0f); // Red outline
+            shaderManager.setObjectColor(1.0f, 0.0f, 0.0f);
 
-            // Get object's model matrix and slightly enlarge it
             float[] modelMatrix = obj.getModelMatrix();
-            float outlineScale = 1.05f; // Small enlargement for outline
+            float outlineScale = 1.05f;
             modelMatrix[0] *= outlineScale; 
             modelMatrix[5] *= outlineScale; 
             modelMatrix[10] *= outlineScale;
 
-            // Set model matrix
             int modelLoc = glGetUniformLocation(glGetInteger(GL_CURRENT_PROGRAM), "model");
             glUniformMatrix4fv(modelLoc, false, modelMatrix);
 
-            // Render object depending on type
             if (obj.getType() == GameObject.Type.REGULAR) {
                 glBindVertexArray(cubeVAO);
                 glDrawArrays(GL_TRIANGLES, 0, 36);
@@ -2235,13 +2298,11 @@ public class Main {
                 glDrawElements(GL_TRIANGLES, sphereIndices.length, GL_UNSIGNED_INT, 0);
             }
 
-            // Restore settings
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             glEnable(GL_DEPTH_TEST);
             shaderManager.setUseLighting(true);
         }
 
-        // Clean graphics resources
         public void cleanup() {
             if (cubeVAO != 0) glDeleteVertexArrays(cubeVAO);
             if (cubeVBO != 0) glDeleteBuffers(cubeVBO);
@@ -2255,19 +2316,15 @@ public class Main {
         }
     }
 
-    // ========== FPS COUNTER CLASS (FPSCounter) ==========
-    // Calculates and averages FPS over the last second
     private static class FPSCounter {
-        private float fps = 0.0f;           // Current FPS
-        private float timeAccumulator = 0.0f; // Time accumulator
-        private int frameCount = 0;         // Frame counter
+        private float fps = 0.0f;
+        private float timeAccumulator = 0.0f;
+        private int frameCount = 0;
         
-        // Update counter (called each frame)
         public void update(float deltaTime) {
             timeAccumulator += deltaTime;
             frameCount++;
             
-            // Recalculate FPS every second
             if (timeAccumulator >= 1.0f) {
                 fps = frameCount / timeAccumulator;
                 frameCount = 0;
@@ -2275,7 +2332,6 @@ public class Main {
             }
         }
         
-        // Get current FPS
         public float getFPS() {
             return fps;
         }

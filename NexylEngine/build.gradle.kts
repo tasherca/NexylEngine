@@ -52,12 +52,14 @@ dependencies {
     implementation("org.lwjgl", "lwjgl-glfw")
     implementation("org.lwjgl", "lwjgl-opengl")
     implementation("org.lwjgl", "lwjgl-stb")
+    implementation("org.lwjgl", "lwjgl-tinyfd") // Добавлено для нативных диалогов
 
     // Нативные зависимости
     runtimeOnly("org.lwjgl", "lwjgl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-glfw", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-opengl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-stb", classifier = lwjglNatives)
+    runtimeOnly("org.lwjgl", "lwjgl-tinyfd", classifier = lwjglNatives) // Добавлено
 
     // Добавляем нативные зависимости для всех платформ
     runtimeOnly("io.github.spair:imgui-java-natives-windows:1.86.11")
@@ -79,6 +81,15 @@ tasks.test {
 
 tasks.withType<JavaExec> {
     jvmArgs = listOf("-Xmx2g", "--enable-preview")
+    
+    // Force X11 backend on Linux
+    if (System.getProperty("os.name").lowercase().contains("linux")) {
+        environment("GDK_BACKEND", "x11")
+        environment("XDG_SESSION_TYPE", "x11")
+        environment("QT_QPA_PLATFORM", "xcb")
+        environment("SDL_VIDEODRIVER", "x11")
+        environment("JAVA_TOOL_OPTIONS", "-Djdk.gtk.version=2")
+    }
 }
 
 tasks.withType<JavaCompile> {
@@ -88,6 +99,15 @@ tasks.withType<JavaCompile> {
 
 tasks.named<JavaExec>("run") {
     jvmArgs = listOf("--enable-preview", "-Xmx2g")
+    
+    // Force X11 backend on Linux
+    if (System.getProperty("os.name").lowercase().contains("linux")) {
+        environment("GDK_BACKEND", "x11")
+        environment("XDG_SESSION_TYPE", "x11")
+        environment("QT_QPA_PLATFORM", "xcb")
+        environment("SDL_VIDEODRIVER", "x11")
+        environment("JAVA_TOOL_OPTIONS", "-Djdk.gtk.version=2")
+    }
 }
 
 // Создаем FAT JAR
@@ -108,90 +128,20 @@ tasks.named<Jar>("jar") {
     })
 }
 
-// ========== НАТИВНАЯ СБОРКА С ПОИСКОМ LIBERICA NIK ==========
-
-// Определяем путь к Liberica NIK
-val libericaHome = System.getenv("LIBERICA_HOME") ?: "C:\\Program Files\\BellSoft\\LibericaJDK-21"
-val libericaNikDir = file(libericaHome)
-val nativeImageCmd = file("$libericaHome/bin/native-image.cmd")
-
-// Задача для проверки Liberica NIK
-tasks.register("checkLiberica") {
-    group = "native"
-    description = "Check if Liberica NIK is installed"
-    
-    doLast {
-        println("=== ПРОВЕРКА LIBERICA NIK ===")
-        println("Ищем по пути: $libericaHome")
-        
-        if (libericaNikDir.exists()) {
-            println("✓ Директория Liberica NIK найдена")
-        } else {
-            println("✗ Директория Liberica NIK не найдена")
-        }
-        
-        if (nativeImageCmd.exists()) {
-            println("✓ Native Image найден: ${nativeImageCmd.absolutePath}")
-        } else {
-            println("✗ Native Image не найден")
-        }
-        
-        // Проверяем альтернативные пути
-        val altPaths = listOf(
-            "C:\\Program Files\\LibericaJDK-21",
-            "C:\\BellSoft\\LibericaJDK-21",
-            System.getenv("JAVA_HOME") ?: ""
-        )
-        
-        for (path in altPaths) {
-            if (path.isNotEmpty()) {
-                val altNativeImage = file("$path/bin/native-image.cmd")
-                if (altNativeImage.exists()) {
-                    println("✓ Найден альтернативный Native Image: ${altNativeImage.absolutePath}")
-                    return@doLast
-                }
-            }
-        }
-        
-        if (!nativeImageCmd.exists()) {
-            println("\n=== ИНСТРУКЦИЯ ===")
-            println("1. Установите Liberica Native Image Kit:")
-            println("   https://bell-sw.com/pages/downloads/native-image-kit/")
-            println("2. Установите в: C:\\Program Files\\BellSoft\\LibericaJDK-21")
-            println("3. Или установите переменную окружения:")
-            println("   setx LIBERICA_HOME \"путь\\к\\liberica\"")
-        }
-    }
-}
+// ========== НАТИВНАЯ СБОРКА ==========
 
 // Задача для нативной сборки
 tasks.register<Exec>("buildNative") {
     group = "native"
     description = "Build native executable"
     
-    // Если native-image существует, используем его
-    val cmd = if (nativeImageCmd.exists()) {
-        nativeImageCmd.absolutePath
-    } else {
-        // Ищем в альтернативных путях
-        val altPaths = listOf(
-            "C:\\Program Files\\LibericaJDK-21\\bin\\native-image.cmd",
-            "C:\\BellSoft\\LibericaJDK-21\\bin\\native-image.cmd",
-            "${System.getenv("JAVA_HOME")}\\bin\\native-image.cmd"
-        ).firstOrNull { file(it).exists() }
-        
-        if (altPaths != null) {
-            altPaths
-        } else {
-            // Если не нашли, используем команду из PATH
-            "native-image.cmd"
-        }
-    }
-    
     val jarFile = tasks.jar.get().archiveFile.get().asFile
     
+    // Try to find native-image command
+    val nativeImageCmd = findNativeImageCommand()
+    
     commandLine(
-        cmd,
+        nativeImageCmd,
         "-jar", jarFile.absolutePath,
         "nexyl-engine",
         "--no-fallback",
@@ -203,60 +153,102 @@ tasks.register<Exec>("buildNative") {
     
     doFirst {
         println("=== НАЧИНАЕМ СБОРКУ НАТИВНОГО ОБРАЗА ===")
-        println("Команда: $cmd")
+        println("Команда: $nativeImageCmd")
         println("JAR файл: $jarFile")
         
-        // Проверяем существование команды
-        if (cmd == "native-image.cmd") {
-            println("Используем native-image.cmd из PATH")
-        } else if (!file(cmd).exists()) {
-            throw GradleException("Native Image не найден. Установите Liberica NIK.")
+        if (!file(nativeImageCmd).exists() && !isInPath(nativeImageCmd)) {
+            throw GradleException("Native Image не найден. Установите GraalVM или Liberica NIK.")
         }
     }
     
     doLast {
         println("✓ Нативный образ собран")
-        println("Файл: nexyl-engine.exe")
+        println("Файл: nexyl-engine")
     }
     
     dependsOn("jar")
 }
 
-// Альтернативная задача с ручным указанием пути
-tasks.register<Exec>("buildNativeManual") {
-    group = "native"
-    description = "Build native executable with manual path"
+fun findNativeImageCommand(): String {
+    val os = System.getProperty("os.name").lowercase()
     
-    val jarFile = tasks.jar.get().archiveFile.get().asFile
+    // Try common paths
+    val paths = mutableListOf<String>()
     
-    // Ручной ввод пути - пользователь должен указать
-    val manualPath = providers.gradleProperty("liberica.path")
-        .orElse(System.getenv("LIBERICA_HOME"))
-        .orElse("C:\\Program Files\\BellSoft\\LibericaJDK-21")
-        .get() + "\\bin\\native-image.cmd"
+    if (os.contains("linux") || os.contains("mac")) {
+        paths.add("native-image")
+        paths.add("/usr/bin/native-image")
+        paths.add("/usr/local/bin/native-image")
+        paths.add("${System.getenv("HOME")}/.sdkman/candidates/java/current/bin/native-image")
+        paths.add("/opt/graalvm/bin/native-image")
+        paths.add("/opt/graalvm-ce-java21/bin/native-image")
+    } else if (os.contains("win")) {
+        paths.add("native-image.cmd")
+        paths.add("C:\\Program Files\\GraalVM\\graalvm-ce-java21\\bin\\native-image.cmd")
+        paths.add("C:\\Program Files\\BellSoft\\LibericaJDK-21\\bin\\native-image.cmd")
+    }
     
-    commandLine(
-        manualPath,
-        "-jar", jarFile.absolutePath,
-        "nexyl-engine",
-        "--no-fallback",
-        "--enable-url-protocols=http,https",
-        "-H:+JNI",
-        "-H:+AllowIncompleteClasspath",
-        "--verbose"
-    )
-    
-    doFirst {
-        println("Используем путь: $manualPath")
-        if (!file(manualPath).exists()) {
-            throw GradleException("Native Image не найден по пути: $manualPath")
+    // Check environment variables
+    val javaHome = System.getenv("JAVA_HOME")
+    if (javaHome != null) {
+        if (os.contains("win")) {
+            paths.add("$javaHome\\bin\\native-image.cmd")
+        } else {
+            paths.add("$javaHome/bin/native-image")
         }
     }
     
-    dependsOn("jar")
+    val graalvmHome = System.getenv("GRAALVM_HOME")
+    if (graalvmHome != null) {
+        if (os.contains("win")) {
+            paths.add("$graalvmHome\\bin\\native-image.cmd")
+        } else {
+            paths.add("$graalvmHome/bin/native-image")
+        }
+    }
+    
+    // Find first existing command
+    for (path in paths) {
+        if (file(path).exists() || isInPath(path)) {
+            return path
+        }
+    }
+    
+    return "native-image" // Fallback
 }
 
-// Простая команда для пользователя - собирает JAR и показывает инструкцию
+fun isInPath(command: String): Boolean {
+    return try {
+        ProcessBuilder("which", command).start().waitFor() == 0
+    } catch (e: Exception) {
+        false
+    }
+}
+
+// Задача для проверки доступности Native Image
+tasks.register("checkNativeImage") {
+    group = "native"
+    description = "Check if Native Image is available"
+    
+    doLast {
+        println("=== ПРОВЕРКА NATIVE IMAGE ===")
+        val cmd = findNativeImageCommand()
+        
+        if (file(cmd).exists() || isInPath(cmd)) {
+            println("✓ Native Image найден: $cmd")
+        } else {
+            println("✗ Native Image не найден")
+            println("\n=== ИНСТРУКЦИЯ ===")
+            println("1. Установите GraalVM или Liberica Native Image Kit:")
+            println("   - GraalVM: https://www.graalvm.org/downloads/")
+            println("   - Liberica NIK: https://bell-sw.com/pages/downloads/native-image-kit/")
+            println("2. Добавьте в PATH: /path/to/graalvm/bin")
+            println("3. Или установите переменную окружения JAVA_HOME")
+        }
+    }
+}
+
+// Простая команда для пользователя
 tasks.register("nativeBuildHelp") {
     group = "native"
     description = "Show native build instructions"
@@ -273,61 +265,22 @@ tasks.register("nativeBuildHelp") {
         
         ДАЛЬНЕЙШИЕ ДЕЙСТВИЯ:
         
-        1. Убедитесь, что установлен Liberica Native Image Kit:
-           https://bell-sw.com/pages/downloads/native-image-kit/
-           
-        2. Откройте CMD или PowerShell в папке с проектом
+        1. Убедитесь, что установлен GraalVM Native Image или Liberica NIK
         
-        3. Выполните одну из команд:
+        2. Для Linux/Mac:
+           native-image -jar ${jarFile.absolutePath} nexyl-engine --no-fallback
         
-        Вариант A (если Liberica в PATH):
-        native-image.cmd -jar ${jarFile.absolutePath} nexyl-engine --no-fallback
+        3. Для Windows:
+           native-image.cmd -jar ${jarFile.absolutePath} nexyl-engine --no-fallback
         
-        Вариант B (если Liberica установлен в стандартном месте):
-        "C:\Program Files\BellSoft\LibericaJDK-21\bin\native-image.cmd" -jar ${jarFile.absolutePath} nexyl-engine --no-fallback
-        
-        Вариант C (ручное выполнение через gradle):
-        ./gradlew buildNative
+        4. Или используйте Gradle:
+           ./gradlew buildNative
         
         ДОПОЛНИТЕЛЬНЫЕ ПАРАМЕТРЫ:
         --enable-url-protocols=http,https
         -H:+JNI
         -H:+AllowIncompleteClasspath
         --verbose
-        
-        === УСТРАНЕНИЕ ПРОБЛЕМ ===
-        
-        1. Если native-image.cmd не найден:
-           - Установите Liberica Native Image Kit
-           - Или установите переменную окружения LIBERICA_HOME
-           
-        2. Если используется GraalVM из Scoop:
-           - Временно удалите из PATH: C:\Users\iv4no\scoop\apps\graalvm22\current\bin
-           - Или используйте полный путь к Liberica
         """.trimIndent())
-    }
-}
-
-// Задача для сборки без зависимостей (ручной режим)
-tasks.register("prepareForNativeBuild") {
-    group = "native"
-    description = "Prepare everything for native build"
-    
-    dependsOn("jar")
-    
-    doLast {
-        val jarFile = tasks.jar.get().archiveFile.get().asFile
-        
-        println("=== ВСЕ ГОТОВО ДЛЯ РУЧНОЙ СБОРКИ ===")
-        println()
-        println("1. JAR файл создан: build/libs/${jarFile.name}")
-        println()
-        println("2. Откройте CMD и перейдите в папку проекта:")
-        println("   cd \"C:\\Users\\iv4no\\Documents\\NexylEngine\"")
-        println()
-        println("3. Выполните команду сборки:")
-        println("   \"C:\\Program Files\\BellSoft\\LibericaJDK-21\\bin\\native-image.cmd\" -jar build\\libs\\${jarFile.name} nexyl-engine --no-fallback --enable-url-protocols=http,https -H:+JNI -H:+AllowIncompleteClasspath")
-        println()
-        println("4. Если Liberica установлен в другом месте, укажите правильный путь")
     }
 }
